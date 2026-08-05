@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Block Tanks（仮）— Phase 1 プロトタイプ</title>
+<style>
+  /* 依存ゼロ：スタイルもすべてこのファイル内に記述 */
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #14161c;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    color: #9aa4b8;
+    user-select: none;
+  }
+  canvas {
+    background: #232733;
+    cursor: none; /* 自前の十字カーソルを描くため OS カーソルは隠す */
+  }
+  .hint { margin-top: 10px; font-size: 13px; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="544"></canvas>
+<div class="hint">WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ Esc・P: ポーズ ／ R: リスタート</div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+ * CONFIG — 調整値の一元管理（マジックナンバー禁止。数値は GDD v0.1 を正とする）
+ * 角度の単位はすべてラジアン。座標は px、時間は秒。
+ * ===================================================================== */
+const CONFIG = {
+  TILE: 32,            // 1タイルの辺長 [px]
+  COLS: 25,            // 盤面の横タイル数
+  ROWS: 17,            // 盤面の縦タイル数（25×17 = 800×544px）
+  DT_MAX: 0.05,        // デルタタイムの上限クランプ [s]（タブ復帰時の吹っ飛び防止）
+
+  PLAYER: {
+    SPEED: 120,              // 移動速度 [px/s]（GDD §4）
+    SIZE: 28,                // 車体当たり判定（正方形の辺長）[px]
+    RADIUS: 14,              // 対弾用の円近似半径 [px]（28×28 の円近似）
+    FIRE_INTERVAL: 0.3,      // 発射間隔 [s]
+    MAX_BULLETS: 5,          // 同時発射数上限
+    BODY_TURN_SPEED: 12,     // 車体の向きの追従速度 [rad/s]（演出用。GDD「滑らかに回転」）
+  },
+
+  BULLET: {
+    SPEED: 200,          // 弾速 [px/s]（GDD §4・§6）
+    RADIUS: 4,           // 弾の当たり判定半径 [px]
+    MAX_BOUNCES: 1,      // 反射上限（2回目の壁接触で消滅）
+    MUZZLE_OFFSET: 22,   // 砲口オフセット [px]（車体半径14+弾半径4 より外側 → 発射直後の自爆なし）
+  },
+
+  SENTRY: {                          // 敵A「セントリー」（GDD §6）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: Math.PI / 2,         // 砲塔回転速度 90°/s
+    JITTER_MAX: 3 * Math.PI / 180,   // 照準の最大ブレ（±3°）
+    JITTER_INTERVAL_MIN: 0.4,        // ブレ量を引き直す間隔（最小）[s]
+    JITTER_INTERVAL_MAX: 1.2,        // ブレ量を引き直す間隔（最大）[s]
+    FIRE_INTERVAL_MEAN: 3.0,         // 発射間隔の平均 [s]
+    FIRE_INTERVAL_VAR: 1.0,          // 発射間隔のゆらぎ幅（±）[s]
+    MAX_BULLETS: 1,                  // 同時発射数上限
+    FIRE_ANGLE_TOL: 0.15,            // 発射許可の照準許容角 [rad]（砲塔がほぼプレイヤー方向のときのみ撃つ）
+  },
+
+  GAME: {
+    LIVES: 3,          // 初期残機（GDD §8）
+    START_GRACE: 1.0,  // ステージ開始後、敵が射撃しない時間 [s]（開幕即死防止）
+  },
+
+  LOS_STEP: 6,  // 射線判定（レイキャスト）のサンプリング間隔 [px]
+
+  COLORS: {  // オリジナル配色（原作の配色を模倣しない：寒色基調＋プレイヤー青／敵は橙）
+    FLOOR: "#232733",
+    FLOOR_GRID: "#272c39",
+    WALL: "#4c566a",
+    WALL_EDGE: "#5d6a82",
+    HOLE: "#12141b",
+    HOLE_EDGE: "#0a0b10",
+    PLAYER_BODY: "#2f6fd0",
+    PLAYER_TRACK: "#1d4587",
+    PLAYER_TURRET: "#7fb2ff",
+    ENEMY_BODY: "#d07a2f",
+    ENEMY_TRACK: "#8a4d15",
+    ENEMY_TURRET: "#ffc07f",
+    BULLET: "#f2f0e6",
+    BULLET_EDGE: "#8f8c7c",
+    CROSSHAIR: "#e8ecf5",
+    HUD: "#e8ecf5",
+    OVERLAY: "rgba(10, 12, 18, 0.65)",
+  },
+};
+
+/* =====================================================================
+ * ステージデータ — コードから分離した文字列グリッド（1行 = 1文字列）
+ *   . 床（通行可・弾通過）   # 恒久壁（通行不可・弾反射）
+ *   H 穴（戦車不可・弾は上を通過）
+ *   P プレイヤー初期位置（床扱い）   A 敵A「セントリー」（床扱い）
+ * 外周は全て #。
+ *
+ * ◆Phase 1 テストステージ（オリジナル設計）の意図：
+ *   - 盤面は縦の分断壁（col16：上部10タイルは壁、下部5タイルは穴 H）で
+ *     左右に仕切られ、戦車は右ゾーンへ入れない（H は弾だけが通過）。
+ *   - 左ゾーンのセントリー（7,3）：直接照準で倒せる「基本」の的。
+ *   - 右ゾーンのセントリー（20,3）：左ゾーンからの直接射線は
+ *     「分断壁の上部」と「右ゾーン内の横壁（row5）」で全て遮られる。
+ *     倒すには、盤面左下から H の堀ごしに撃ち、右外周壁で1回反射させて
+ *     上へ跳ね返す跳弾ショットが必要（＝跳弾専用の的）。
+ * ===================================================================== */
+const STAGE_TEST = [
+  "#########################",
+  "#...............#.......#",
+  "#...............#.......#",
+  "#......A........#...A...#",
+  "#...............#.......#",
+  "#...............#####...#",
+  "#...............#.......#",
+  "#...............#.......#",
+  "#....##.........#.......#",
+  "#...............#.......#",
+  "#..........##...#.......#",
+  "#..........##...H.......#",
+  "#...............H.......#",
+  "#..P............H.......#",
+  "#...............H.......#",
+  "#...............H.......#",
+  "#########################",
+];
+
+/* =====================================================================
+ * ユーティリティ（角度・乱数）
+ * ===================================================================== */
+
+/** 角度を (-PI, PI] に正規化する */
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a <= -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+/** 角度差 target - current を最短方向で返す */
+function angleDiff(target, current) {
+  return normalizeAngle(target - current);
+}
+
+/** current を target に向けて最大 maxStep だけ回す（最短方向） */
+function rotateToward(current, target, maxStep) {
+  const d = angleDiff(target, current);
+  if (Math.abs(d) <= maxStep) return target;
+  return normalizeAngle(current + Math.sign(d) * maxStep);
+}
+
+/** min〜max の一様乱数 */
+function randRange(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+/* =====================================================================
+ * ステージ読み込み — グリッドの検証とスポーン位置の抽出
+ * ===================================================================== */
+const T = CONFIG.TILE;
+
+/** ステージ文字列グリッドを解析して { grid, playerSpawn, enemySpawns } を返す */
+function parseStage(rows) {
+  if (rows.length !== CONFIG.ROWS) {
+    throw new Error(`ステージの行数が不正: ${rows.length} (期待値 ${CONFIG.ROWS})`);
+  }
+  const grid = [];
+  let playerSpawn = null;
+  const enemySpawns = [];
+  for (let r = 0; r < rows.length; r++) {
+    if (rows[r].length !== CONFIG.COLS) {
+      throw new Error(`ステージ ${r} 行目の列数が不正: ${rows[r].length} (期待値 ${CONFIG.COLS})`);
+    }
+    const line = [];
+    for (let c = 0; c < rows[r].length; c++) {
+      let ch = rows[r][c];
+      const cx = c * T + T / 2;  // タイル中心座標
+      const cy = r * T + T / 2;
+      if (ch === "P") { playerSpawn = { x: cx, y: cy }; ch = "."; }
+      else if (ch === "A") { enemySpawns.push({ x: cx, y: cy }); ch = "."; }
+      line.push(ch);
+    }
+    grid.push(line);
+  }
+  if (!playerSpawn) throw new Error("ステージに P（プレイヤー初期位置）がありません");
+  return { grid, playerSpawn, enemySpawns };
+}
+
+const stage = parseStage(STAGE_TEST);
+
+/** タイル参照（範囲外は壁扱い） */
+function tileAt(col, row) {
+  if (col < 0 || col >= CONFIG.COLS || row < 0 || row >= CONFIG.ROWS) return "#";
+  return stage.grid[row][col];
+}
+
+/** 戦車にとって通行不可のタイルか（壁・穴） */
+function solidForTank(ch) { return ch === "#" || ch === "H"; }
+
+/** 弾にとって遮蔽となるタイルか（壁のみ。穴は上を通過） */
+function solidForBullet(ch) { return ch === "#"; }
+
+/* =====================================================================
+ * 入力 — キーボード・マウス
+ * ===================================================================== */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+const input = {
+  keys: new Set(),                                   // 押下中のキー（e.code）
+  mouse: { x: canvas.width / 2, y: canvas.height / 2 },  // 照準位置（キャンバス座標）
+  fireRequested: false,                              // 1クリック1発の発射要求フラグ
+};
+
+window.addEventListener("keydown", (e) => {
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(e.code)) e.preventDefault();
+  input.keys.add(e.code);
+
+  // ポーズ切り替え（Esc / P）
+  if (e.code === "Escape" || e.code === "KeyP") {
+    if (game.state === "playing") game.state = "paused";
+    else if (game.state === "paused") game.state = "playing";
+  }
+  // R でゲーム全体をリスタート
+  if (e.code === "KeyR") resetGame();
+});
+
+window.addEventListener("keyup", (e) => { input.keys.delete(e.code); });
+
+canvas.addEventListener("mousemove", (e) => {
+  // CSS で拡縮されても正しい座標になるようスケール補正
+  const rect = canvas.getBoundingClientRect();
+  input.mouse.x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  input.mouse.y = (e.clientY - rect.top) * (canvas.height / rect.height);
+});
+
+canvas.addEventListener("mousedown", (e) => {
+  if (e.button === 0) input.fireRequested = true;  // 左クリックのみ。押しっぱなし連射はしない
+});
+
+/* =====================================================================
+ * エンティティ — プレイヤー・敵・弾の生成
+ * ===================================================================== */
+
+/** ゲーム全体の状態 */
+const game = {
+  state: "playing",   // "playing" | "paused" | "gameover" | "clear"
+  lives: CONFIG.GAME.LIVES,
+  grace: CONFIG.GAME.START_GRACE,  // 敵が撃たない残り時間
+  player: null,
+  enemies: [],
+  bullets: [],
+};
+
+function createPlayer(spawn) {
+  return {
+    kind: "player",
+    x: spawn.x, y: spawn.y,
+    bodyAngle: 0,        // 車体の向き [rad]
+    turretAngle: 0,      // 砲塔の向き [rad]
+    half: CONFIG.PLAYER.SIZE / 2,
+    radius: CONFIG.PLAYER.RADIUS,
+    cooldown: 0,         // 次弾発射可能までの残り時間 [s]
+    alive: true,
+  };
+}
+
+function createSentry(spawn) {
+  return {
+    kind: "sentry",
+    x: spawn.x, y: spawn.y,
+    bodyAngle: Math.PI / 2,   // 車体は固定（見た目のみ）
+    turretAngle: Math.PI / 2, // 初期は下向き
+    half: CONFIG.SENTRY.SIZE / 2,
+    radius: CONFIG.SENTRY.RADIUS,
+    alive: true,
+    // --- ステートマシン（状態機械）: IDLE=開幕待機 / AIM=照準・発射判断 / RELOAD=装填待ち ---
+    state: "IDLE",
+    fireTimer: sentryNextInterval(),  // 次に撃てるまでの残り時間 [s]
+    jitter: 0,                        // 現在の照準ブレ [rad]
+    jitterTimer: 0,                   // ブレ引き直しまでの残り時間 [s]
+  };
+}
+
+function sentryNextInterval() {
+  const c = CONFIG.SENTRY;
+  return c.FIRE_INTERVAL_MEAN + randRange(-c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR);
+}
+
+/** 弾の生成。owner の砲口位置から angle 方向へ発射 */
+function spawnBullet(owner, angle) {
+  const off = CONFIG.BULLET.MUZZLE_OFFSET;
+  game.bullets.push({
+    x: owner.x + Math.cos(angle) * off,
+    y: owner.y + Math.sin(angle) * off,
+    vx: Math.cos(angle) * CONFIG.BULLET.SPEED,
+    vy: Math.sin(angle) * CONFIG.BULLET.SPEED,
+    radius: CONFIG.BULLET.RADIUS,
+    bounces: 0,     // これまでの反射回数
+    owner: owner,   // 同時発射数のカウント用（弾自体は全戦車に当たる）
+    dead: false,
+  });
+}
+
+/** owner が場に出している生存弾の数 */
+function liveBulletCount(owner) {
+  let n = 0;
+  for (const b of game.bullets) if (!b.dead && b.owner === owner) n++;
+  return n;
+}
+
+/* =====================================================================
+ * 物理 — タイル衝突・戦車移動・弾の跳弾
+ * ===================================================================== */
+const EPS = 0.01;  // めり込み防止の押し戻しマージン [px]
+
+/** 矩形（中心 x,y・半辺 half）が solidFn に該当するタイルと重なるか */
+function rectHitsTile(x, y, half, solidFn) {
+  const c0 = Math.floor((x - half) / T);
+  const c1 = Math.floor((x + half - EPS) / T);
+  const r0 = Math.floor((y - half) / T);
+  const r1 = Math.floor((y + half - EPS) / T);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (solidFn(tileAt(c, r))) return true;
+    }
+  }
+  return false;
+}
+
+/** 円（中心 x,y・半径 rad）と重なる弾用遮蔽タイルの矩形を返す（なければ null） */
+function circleHitsWall(x, y, rad) {
+  const c0 = Math.floor((x - rad) / T);
+  const c1 = Math.floor((x + rad) / T);
+  const r0 = Math.floor((y - rad) / T);
+  const r1 = Math.floor((y + rad) / T);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (!solidForBullet(tileAt(c, r))) continue;
+      const left = c * T, top = r * T;
+      // 円と矩形（AABB）の判定：円中心を矩形にクランプして距離を比較
+      const nx = Math.max(left, Math.min(x, left + T));
+      const ny = Math.max(top, Math.min(y, top + T));
+      const dx = x - nx, dy = y - ny;
+      if (dx * dx + dy * dy < rad * rad) {
+        return { left, top, right: left + T, bottom: top + T };
+      }
+    }
+  }
+  return null;
+}
+
+/** 2つの戦車（AABB）が重なっているか */
+function tanksOverlap(ax, ay, aHalf, b) {
+  return Math.abs(ax - b.x) < aHalf + b.half && Math.abs(ay - b.y) < aHalf + b.half;
+}
+
+/**
+ * 戦車を軸ごとに移動させる（X→Y の順。壁・穴タイルおよび blockers（他戦車）と衝突判定）。
+ * タイルに当たった場合はタイル境界へスナップ（めり込み防止）。
+ * 注：戦車同士の通り抜け防止は GDD 未記載の暫定仕様（オーナー確認事項として報告済み）。
+ */
+function moveTank(tank, dx, dy, blockers) {
+  // --- X軸 ---
+  if (dx !== 0) {
+    let nx = tank.x + dx;
+    if (rectHitsTile(nx, tank.y, tank.half, solidForTank)) {
+      if (dx > 0) nx = Math.floor((nx + tank.half) / T) * T - tank.half - EPS;
+      else nx = (Math.floor((nx - tank.half) / T) + 1) * T + tank.half + EPS;
+    }
+    let blocked = false;
+    for (const o of blockers) {
+      if (o.alive && tanksOverlap(nx, tank.y, tank.half, o)) { blocked = true; break; }
+    }
+    if (!blocked) tank.x = nx;
+  }
+  // --- Y軸 ---
+  if (dy !== 0) {
+    let ny = tank.y + dy;
+    if (rectHitsTile(tank.x, ny, tank.half, solidForTank)) {
+      if (dy > 0) ny = Math.floor((ny + tank.half) / T) * T - tank.half - EPS;
+      else ny = (Math.floor((ny - tank.half) / T) + 1) * T + tank.half + EPS;
+    }
+    let blocked = false;
+    for (const o of blockers) {
+      if (o.alive && tanksOverlap(tank.x, ny, tank.half, o)) { blocked = true; break; }
+    }
+    if (!blocked) tank.y = ny;
+  }
+}
+
+/**
+ * 弾の移動と跳弾（入射角＝反射角）。
+ * 軸ごとに移動→衝突判定→該当軸の速度反転＋押し戻し。
+ * 角で同フレームに両軸が反射しても反射回数は「1回」と数える。
+ * ※弾速200px/s × dt上限0.05s = 最大10px/フレーム < タイル32px なので突き抜けは起きない。
+ */
+function updateBullet(b, dt) {
+  let bounced = false;
+
+  // --- X軸移動 ---
+  b.x += b.vx * dt;
+  let hit = circleHitsWall(b.x, b.y, b.radius);
+  if (hit) {
+    if (b.vx > 0) b.x = hit.left - b.radius - EPS;
+    else b.x = hit.right + b.radius + EPS;
+    b.vx = -b.vx;  // X面での反射（入射角＝反射角）
+    bounced = true;
+  }
+
+  // --- Y軸移動 ---
+  b.y += b.vy * dt;
+  hit = circleHitsWall(b.x, b.y, b.radius);
+  if (hit) {
+    if (b.vy > 0) b.y = hit.top - b.radius - EPS;
+    else b.y = hit.bottom + b.radius + EPS;
+    b.vy = -b.vy;  // Y面での反射
+    bounced = true;
+  }
+
+  if (bounced) {
+    b.bounces++;
+    if (b.bounces > CONFIG.BULLET.MAX_BOUNCES) b.dead = true;  // 反射上限超過（2回目の壁接触）で消滅
+  }
+}
+
+/** 弾同士の相殺：接触した2発を両方消滅させる */
+function resolveBulletVsBullet() {
+  const bs = game.bullets;
+  for (let i = 0; i < bs.length; i++) {
+    if (bs[i].dead) continue;
+    for (let j = i + 1; j < bs.length; j++) {
+      if (bs[j].dead) continue;
+      const dx = bs[i].x - bs[j].x;
+      const dy = bs[i].y - bs[j].y;
+      const rr = bs[i].radius + bs[j].radius;
+      if (dx * dx + dy * dy < rr * rr) {
+        bs[i].dead = true;
+        bs[j].dead = true;
+      }
+    }
+  }
+}
+
+/** 弾 vs 戦車（円近似）。弾は発射者を問わず全戦車に当たる（自分の跳ね返り弾で自爆あり） */
+function bulletHitsTank(b, tank) {
+  const dx = b.x - tank.x;
+  const dy = b.y - tank.y;
+  const rr = b.radius + tank.radius;
+  return dx * dx + dy * dy < rr * rr;
+}
+
+/* =====================================================================
+ * AI — 敵A「セントリー」（ステートマシン）と射線判定
+ * ===================================================================== */
+
+/** 2点間の射線（LOS）が壁で遮られていないか。穴（H）は弾が通るので遮蔽にしない */
+function hasLineOfSight(x0, y0, x1, y1) {
+  const dx = x1 - x0, dy = y1 - y0;
+  const dist = Math.hypot(dx, dy);
+  const steps = Math.max(1, Math.ceil(dist / CONFIG.LOS_STEP));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = x0 + dx * t;
+    const y = y0 + dy * t;
+    if (solidForBullet(tileAt(Math.floor(x / T), Math.floor(y / T)))) return false;
+  }
+  return true;
+}
+
+/**
+ * セントリーの更新。
+ * 状態遷移：IDLE（開幕グレース中）→ AIM（照準・発射判断）→ RELOAD（装填待ち）→ AIM …
+ * どの状態でも砲塔はプレイヤーへ 90°/s で追従し、±数度のブレを載せる。
+ */
+function updateSentry(e, dt) {
+  const c = CONFIG.SENTRY;
+  const p = game.player;
+
+  // --- 照準（全状態共通）：ブレの引き直しと砲塔回転 ---
+  e.jitterTimer -= dt;
+  if (e.jitterTimer <= 0) {
+    e.jitter = randRange(-c.JITTER_MAX, c.JITTER_MAX);
+    e.jitterTimer = randRange(c.JITTER_INTERVAL_MIN, c.JITTER_INTERVAL_MAX);
+  }
+  const toPlayer = Math.atan2(p.y - e.y, p.x - e.x);
+  e.turretAngle = rotateToward(e.turretAngle, toPlayer + e.jitter, c.TURN_SPEED * dt);
+
+  // --- 状態遷移 ---
+  switch (e.state) {
+    case "IDLE":  // 開幕グレース：照準のみ、射撃しない
+      if (game.grace <= 0) e.state = "AIM";
+      break;
+
+    case "AIM": {  // 発射条件が揃ったら撃つ
+      e.fireTimer -= dt;
+      const ready =
+        e.fireTimer <= 0 &&
+        liveBulletCount(e) < c.MAX_BULLETS &&                       // 同時1発
+        Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL &&  // 砲塔がほぼ狙い通り
+        hasLineOfSight(e.x, e.y, p.x, p.y);                         // 射線が通っている
+      if (ready) {
+        spawnBullet(e, e.turretAngle);
+        e.fireTimer = sentryNextInterval();
+        e.state = "RELOAD";
+      }
+      break;
+    }
+
+    case "RELOAD":  // 発射間隔の消化を待つ
+      e.fireTimer -= dt;
+      if (e.fireTimer <= 0) {
+        e.fireTimer = 0;
+        e.state = "AIM";
+      }
+      break;
+  }
+}
+
+/* =====================================================================
+ * ゲームフロー — リセット・被弾・クリア判定
+ * ===================================================================== */
+
+/** ステージを初期状態に戻す（敵・弾・プレイヤー位置。残機は維持） */
+function resetStage() {
+  game.player = createPlayer(stage.playerSpawn);
+  game.enemies = stage.enemySpawns.map(createSentry);
+  game.bullets = [];
+  game.grace = CONFIG.GAME.START_GRACE;
+}
+
+/** ゲーム全体を最初からやり直す（Rキー） */
+function resetGame() {
+  game.lives = CONFIG.GAME.LIVES;
+  game.state = "playing";
+  resetStage();
+}
+
+/** プレイヤー被弾：残機-1。0でゲームオーバー、残っていればステージリセット */
+function onPlayerHit() {
+  game.lives--;
+  if (game.lives <= 0) {
+    game.state = "gameover";
+  } else {
+    resetStage();
+  }
+}
+
+/* =====================================================================
+ * 更新 — 1フレーム分のゲームロジック
+ * ===================================================================== */
+function update(dt) {
+  const p = game.player;
+
+  // --- グレースタイマー（開始後1秒は敵が撃たない） ---
+  if (game.grace > 0) game.grace -= dt;
+
+  // --- プレイヤー入力 → 移動（8方向・斜めは正規化） ---
+  let mx = 0, my = 0;
+  if (input.keys.has("KeyW")) my -= 1;
+  if (input.keys.has("KeyS")) my += 1;
+  if (input.keys.has("KeyA")) mx -= 1;
+  if (input.keys.has("KeyD")) mx += 1;
+  if (mx !== 0 || my !== 0) {
+    const len = Math.hypot(mx, my);       // 斜め入力の速度正規化
+    const dx = (mx / len) * CONFIG.PLAYER.SPEED * dt;
+    const dy = (my / len) * CONFIG.PLAYER.SPEED * dt;
+    moveTank(p, dx, dy, game.enemies);
+    // 車体を移動方向へ滑らかに回転（演出。移動速度には影響しない）
+    const moveAngle = Math.atan2(my, mx);
+    p.bodyAngle = rotateToward(p.bodyAngle, moveAngle, CONFIG.PLAYER.BODY_TURN_SPEED * dt);
+  }
+
+  // --- 砲塔照準（マウスへ常時追従）と射撃 ---
+  p.turretAngle = Math.atan2(input.mouse.y - p.y, input.mouse.x - p.x);
+  if (p.cooldown > 0) p.cooldown -= dt;
+  if (input.fireRequested) {
+    input.fireRequested = false;  // 1クリック1発（条件を満たさなければ不発）
+    if (p.cooldown <= 0 && liveBulletCount(p) < CONFIG.PLAYER.MAX_BULLETS) {
+      spawnBullet(p, p.turretAngle);
+      p.cooldown = CONFIG.PLAYER.FIRE_INTERVAL;
+    }
+  }
+
+  // --- 敵AI ---
+  for (const e of game.enemies) {
+    if (e.alive) updateSentry(e, dt);
+  }
+
+  // --- 弾の移動と跳弾 ---
+  for (const b of game.bullets) {
+    if (!b.dead) updateBullet(b, dt);
+  }
+
+  // --- 弾同士の相殺 ---
+  resolveBulletVsBullet();
+
+  // --- 弾 vs 戦車 ---
+  let playerWasHit = false;
+  for (const b of game.bullets) {
+    if (b.dead) continue;
+    if (bulletHitsTank(b, p)) {   // 自分の弾でも当たる（自爆あり）
+      b.dead = true;
+      playerWasHit = true;
+      continue;
+    }
+    for (const e of game.enemies) {
+      if (e.alive && bulletHitsTank(b, e)) {
+        b.dead = true;
+        e.alive = false;  // 耐久1：即撃破
+        break;
+      }
+    }
+  }
+
+  // --- 消滅した弾を配列から除去 ---
+  game.bullets = game.bullets.filter((b) => !b.dead);
+
+  // --- 勝敗判定（被弾を優先処理） ---
+  if (playerWasHit) {
+    onPlayerHit();
+    return;
+  }
+  if (game.enemies.every((e) => !e.alive)) {
+    game.state = "clear";
+  }
+}
+
+/* =====================================================================
+ * 描画 — すべて Canvas の図形描画（矩形＋円＋線）。外部画像なし
+ * ===================================================================== */
+const C = CONFIG.COLORS;
+
+function drawStage() {
+  // 床
+  ctx.fillStyle = C.FLOOR;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 薄いグリッド線（盤面の視認性向上）
+  ctx.strokeStyle = C.FLOOR_GRID;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let c = 1; c < CONFIG.COLS; c++) {
+    ctx.moveTo(c * T + 0.5, 0);
+    ctx.lineTo(c * T + 0.5, canvas.height);
+  }
+  for (let r = 1; r < CONFIG.ROWS; r++) {
+    ctx.moveTo(0, r * T + 0.5);
+    ctx.lineTo(canvas.width, r * T + 0.5);
+  }
+  ctx.stroke();
+
+  // 壁と穴
+  for (let r = 0; r < CONFIG.ROWS; r++) {
+    for (let c = 0; c < CONFIG.COLS; c++) {
+      const ch = stage.grid[r][c];
+      const x = c * T, y = r * T;
+      if (ch === "#") {
+        ctx.fillStyle = C.WALL;
+        ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = C.WALL_EDGE;   // 上面ハイライトでブロック感を出す
+        ctx.fillRect(x + 2, y + 2, T - 4, 5);
+      } else if (ch === "H") {
+        ctx.fillStyle = C.HOLE_EDGE;
+        ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = C.HOLE;
+        ctx.fillRect(x + 3, y + 3, T - 6, T - 6);
+      }
+    }
+  }
+}
+
+/** 戦車1台の描画（車体矩形＋キャタピラ＋砲塔円＋砲身矩形） */
+function drawTank(tank, bodyColor, trackColor, turretColor) {
+  const s = tank.half * 2;
+
+  // 車体（bodyAngle で回転）
+  ctx.save();
+  ctx.translate(tank.x, tank.y);
+  ctx.rotate(tank.bodyAngle);
+  ctx.fillStyle = trackColor;   // キャタピラ（左右の帯）
+  ctx.fillRect(-s / 2, -s / 2, s, 7);
+  ctx.fillRect(-s / 2, s / 2 - 7, s, 7);
+  ctx.fillStyle = bodyColor;    // 車体中央
+  ctx.fillRect(-s / 2, -s / 2 + 7, s, s - 14);
+  ctx.restore();
+
+  // 砲塔（turretAngle で回転）
+  ctx.save();
+  ctx.translate(tank.x, tank.y);
+  ctx.rotate(tank.turretAngle);
+  ctx.fillStyle = turretColor;
+  ctx.fillRect(0, -3, tank.half + 8, 6);           // 砲身
+  ctx.beginPath();
+  ctx.arc(0, 0, 9, 0, Math.PI * 2);                // 砲塔リング
+  ctx.fill();
+  ctx.fillStyle = bodyColor;
+  ctx.beginPath();
+  ctx.arc(0, 0, 5, 0, Math.PI * 2);                // 砲塔中心
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBullets() {
+  for (const b of game.bullets) {
+    ctx.fillStyle = C.BULLET;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = C.BULLET_EDGE;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+/** 照準位置の十字カーソル */
+function drawCrosshair() {
+  const { x, y } = input.mouse;
+  ctx.strokeStyle = C.CROSSHAIR;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x - 10, y); ctx.lineTo(x - 4, y);
+  ctx.moveTo(x + 4, y); ctx.lineTo(x + 10, y);
+  ctx.moveTo(x, y - 10); ctx.lineTo(x, y - 4);
+  ctx.moveTo(x, y + 4); ctx.lineTo(x, y + 10);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, 2, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+/** HUD：残機・敵残数（上端の外周壁上に重ねて表示） */
+function drawHUD() {
+  const enemiesLeft = game.enemies.filter((e) => e.alive).length;
+  ctx.fillStyle = C.HUD;
+  ctx.font = "bold 15px sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`残機: ${game.lives}`, 10, 16);
+  ctx.textAlign = "right";
+  ctx.fillText(`敵: ${enemiesLeft}`, canvas.width - 10, 16);
+}
+
+/** ポーズ・ゲームオーバー・クリアの全画面オーバーレイ */
+function drawOverlay(title, sub) {
+  ctx.fillStyle = C.OVERLAY;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = C.HUD;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold 42px sans-serif";
+  ctx.fillText(title, canvas.width / 2, canvas.height / 2 - 18);
+  ctx.font = "16px sans-serif";
+  ctx.fillText(sub, canvas.width / 2, canvas.height / 2 + 26);
+}
+
+function draw() {
+  drawStage();
+
+  for (const e of game.enemies) {
+    if (e.alive) drawTank(e, C.ENEMY_BODY, C.ENEMY_TRACK, C.ENEMY_TURRET);
+  }
+  drawTank(game.player, C.PLAYER_BODY, C.PLAYER_TRACK, C.PLAYER_TURRET);
+  drawBullets();
+  drawHUD();
+
+  if (game.state === "paused") drawOverlay("PAUSED", "Esc / P で再開");
+  else if (game.state === "gameover") drawOverlay("GAME OVER", "R でリスタート");
+  else if (game.state === "clear") drawOverlay("MISSION CLEAR", "R でリスタート");
+
+  drawCrosshair();
+}
+
+/* =====================================================================
+ * メインループ — requestAnimationFrame + デルタタイム（フレームレート非依存）
+ * ===================================================================== */
+let lastTime = performance.now();
+
+function frame(now) {
+  // デルタタイム算出＋上限クランプ（タブ復帰時などの巨大 dt による吹っ飛びを防ぐ）
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (dt > CONFIG.DT_MAX) dt = CONFIG.DT_MAX;
+
+  if (game.state === "playing") update(dt);
+  draw();
+
+  requestAnimationFrame(frame);
+}
+
+resetGame();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
