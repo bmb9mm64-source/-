@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Block Tanks（仮）— Phase 2</title>
+<!-- タブアイコン（外部ファイル不要のインラインSVG。favicon 404 のコンソールエラー防止） -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='5' width='12' height='9' rx='1' fill='%232f6fd0'/%3E%3Ccircle cx='8' cy='9' r='3' fill='%237fb2ff'/%3E%3Crect x='7' y='1' width='2' height='6' fill='%237fb2ff'/%3E%3C/svg%3E">
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #14161c;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    color: #9aa4b8;
+    user-select: none;
+  }
+  .hint { margin-top: 10px; font-size: 13px; letter-spacing: 0.05em; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="hint">WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ Esc・P: ポーズ ／ R: リスタート</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
