@@ -12,7 +12,7 @@ const rngHalf = (): number => 0.5;
 
 function makeCtx(overrides: Partial<SentryUpdateContext> = {}): SentryUpdateContext {
   return {
-    player: { x: 80, y: 112 }, // セントリーの真下 → 初期砲塔角（下向き）と一致
+    players: [{ x: 80, y: 112, alive: true }], // セントリーの真下 → 初期砲塔角（下向き）と一致
     bullets: [] as Bullet[],
     stage,
     grace: 0,
@@ -62,7 +62,7 @@ describe("セントリーAI（ステートマシン）", () => {
       "#####",
     ]);
     const e = createSentry(48, 48, rngHalf);
-    const ctx = makeCtx({ player: { x: 48, y: 112 }, stage: blockedStage });
+    const ctx = makeCtx({ players: [{ x: 48, y: 112, alive: true }], stage: blockedStage });
     for (let i = 0; i < 200; i++) updateSentry(e, 0.05, ctx);
     expect(ctx.bullets).toHaveLength(0); // 撃たない（跳弾専用の的：GDD v0.2 §6 補足）
   });

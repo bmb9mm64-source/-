@@ -70,6 +70,43 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
   return { grid, cols, rows, tile, playerSpawn, sentrySpawns, roverSpawns };
 }
 
+/**
+ * 2P の初期位置探索で調べる近傍タイルの順序（右・左・下・上→斜め→距離2の直交）。
+ * GDD §12.5 に 2P の湧き位置の明記がないための暫定解釈：
+ * ステージデータ（P は1つ）を変更せず、P1 の隣の床タイルに 2P を湧かせる。
+ */
+const COOP_SPAWN_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [1, -1],
+  [-1, -1],
+  [2, 0],
+  [-2, 0],
+  [0, 2],
+  [0, -2],
+];
+
+/**
+ * origin（px 座標）のタイルの近傍から床 '.' タイルの中心を探す（2P 初期位置用）。
+ * 全ミッションで P の隣に床があることは missions のテストで担保する。
+ * 万一見つからなければ origin をそのまま返す（保険）。
+ */
+export function findNearbyFloor(stage: ParsedStage, origin: Vec2): Vec2 {
+  const t = stage.tile;
+  const c0 = Math.floor(origin.x / t);
+  const r0 = Math.floor(origin.y / t);
+  for (const [dc, dr] of COOP_SPAWN_OFFSETS) {
+    if (tileAt(stage, c0 + dc, r0 + dr) === ".") {
+      return { x: (c0 + dc) * t + t / 2, y: (r0 + dr) * t + t / 2 };
+    }
+  }
+  return { x: origin.x, y: origin.y };
+}
+
 /** タイル参照（範囲外は壁扱い） */
 export function tileAt(stage: ParsedStage, col: number, row: number): string {
   if (col < 0 || col >= stage.cols || row < 0 || row >= stage.rows) return "#";

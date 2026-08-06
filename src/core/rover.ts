@@ -7,10 +7,10 @@
  */
 import { BALANCE } from "../config/balance";
 import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
-import { hasLineOfSight } from "./los";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
 import { type ParsedStage, tileAt } from "./stage";
 import { moveTank, type TankBlocker } from "./tank";
+import { selectTarget, type TargetInfo } from "./targeting";
 import type { TankBody, Vec2 } from "./types";
 
 /** ローバーの状態名 */
@@ -79,7 +79,7 @@ export function pickWanderTarget(stage: ParsedStage, rng: Rng, fallback: Vec2): 
 
 /** updateRover に渡す周辺情報 */
 export interface RoverUpdateContext {
-  player: Vec2; // プレイヤー（弾の owner 識別にも同一オブジェクトを渡すこと）
+  players: readonly TargetInfo[]; // 全プレイヤー（標的選択と弾の owner 識別に使う。実体の PlayerTank を渡すこと）
   bullets: Bullet[];
   blockers: readonly TankBlocker[]; // 自分以外の全戦車（通り抜け不可・回避対象）
   stage: ParsedStage;
@@ -87,11 +87,17 @@ export interface RoverUpdateContext {
   rng: Rng;
 }
 
+/** 弾がいずれかのプレイヤーの発射した弾か（参照比較。GDD §12.5：2P の弾も回避対象） */
+function isPlayerBullet(b: Bullet, players: readonly TargetInfo[]): boolean {
+  for (const p of players) if ((p as object) === b.owner) return true;
+  return false;
+}
+
 /** 接近中のプレイヤー弾（回避のきっかけ）を探す。なければ null */
 function findThreatBullet(e: RoverTank, ctx: RoverUpdateContext): Bullet | null {
   const c = BALANCE.ROVER;
   for (const b of ctx.bullets) {
-    if (b.dead || b.owner !== ctx.player) continue; // プレイヤーの弾のみ警戒（GDD §6）
+    if (b.dead || !isPlayerBullet(b, ctx.players)) continue; // プレイヤーの弾のみ警戒（GDD §6。全プレイヤー分）
     const dx = e.x - b.x;
     const dy = e.y - b.y;
     if (dx * dx + dy * dy > c.DODGE_DETECT_RADIUS * c.DODGE_DETECT_RADIUS) continue;
@@ -103,11 +109,13 @@ function findThreatBullet(e: RoverTank, ctx: RoverUpdateContext): Bullet | null 
 /** ローバーの更新（1フレーム分。dt は秒） */
 export function updateRover(e: RoverTank, dt: number, ctx: RoverUpdateContext): void {
   const c = BALANCE.ROVER;
-  const p = ctx.player;
 
-  // --- 砲塔照準（全状態共通）：プレイヤーへ 120°/s で追従 ---
-  const toPlayer = Math.atan2(p.y - e.y, p.x - e.x);
-  e.turretAngle = rotateToward(e.turretAngle, toPlayer, c.TURN_SPEED * dt);
+  // --- 標的選択（GDD §12.5）：射線が通る最も近い生存者。全員遮蔽なら最も近い生存者（照準のみ） ---
+  const pick = selectTarget(ctx.stage, e.x, e.y, ctx.players);
+
+  // --- 砲塔照準（全状態共通）：標的へ追従 ---
+  const toPlayer = pick ? Math.atan2(pick.target.y - e.y, pick.target.x - e.x) : e.turretAngle;
+  if (pick) e.turretAngle = rotateToward(e.turretAngle, toPlayer, c.TURN_SPEED * dt);
 
   // --- 回避判定：プレイヤー弾の接近を検知したら低確率で DODGE へ遷移 ---
   if (e.dodgeCooldown > 0) e.dodgeCooldown -= dt;
@@ -173,8 +181,9 @@ export function updateRover(e: RoverTank, dt: number, ctx: RoverUpdateContext): 
     ctx.grace <= 0 && // 開幕グレース明け
     e.fireTimer <= 0 && // 発射間隔を消化済み
     liveBulletCount(ctx.bullets, e) < c.MAX_BULLETS && // 同時1発
-    Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL && // 砲塔がほぼ狙い通り
-    hasLineOfSight(ctx.stage, e.x, e.y, p.x, p.y); // 射線が通っている
+    pick !== null &&
+    pick.hasLos && // 標的への射線が通っている（全員遮蔽なら照準追従のみ。GDD §12.5）
+    Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL; // 砲塔がほぼ狙い通り
   if (ready) {
     spawnBullet(ctx.bullets, e, e.turretAngle, ENEMY_BULLET_CFG);
     e.fireTimer = roverNextInterval(ctx.rng);

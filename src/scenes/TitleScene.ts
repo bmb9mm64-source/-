@@ -1,5 +1,6 @@
 /**
- * タイトルシーン — タイトル・操作説明を表示し、クリックでゲーム開始。
+ * タイトルシーン — タイトル・操作説明を表示し、「1人で出撃／2人で出撃」を選んでゲーム開始
+ * （クリックまたは 1 / 2 キー。GDD §12.5）。
  * 描画はすべてコード描画（外部アセット禁止・オリジナル配色）。
  */
 import Phaser from "phaser";
@@ -28,52 +29,85 @@ export class TitleScene extends Phaser.Scene {
       bg.lineBetween(0, r * BALANCE.TILE + 0.5, w, r * BALANCE.TILE + 0.5);
     }
 
-    // 装飾：プレイヤー戦車風のシンボル（矩形＋円のコード描画）
+    // 装飾：1P（青）と2P（緑）の戦車風シンボルを並べる（矩形＋円のコード描画）
     const deco = this.add.graphics();
-    const cx = w / 2;
-    const cy = h / 2 - 130;
-    deco.fillStyle(COLORS.PLAYER_TRACK, 1);
-    deco.fillRect(cx - 28, cy - 28, 56, 14);
-    deco.fillRect(cx - 28, cy + 14, 56, 14);
-    deco.fillStyle(COLORS.PLAYER_BODY, 1);
-    deco.fillRect(cx - 28, cy - 14, 56, 28);
-    deco.fillStyle(COLORS.PLAYER_TURRET, 1);
-    deco.fillRect(cx - 6, cy - 60, 12, 46);
-    deco.fillCircle(cx, cy, 18);
-    deco.fillStyle(COLORS.PLAYER_BODY, 1);
-    deco.fillCircle(cx, cy, 10);
+    const cy = h / 2 - 148;
+    const drawSymbol = (cx: number, body: number, track: number, turret: number): void => {
+      deco.fillStyle(track, 1);
+      deco.fillRect(cx - 24, cy - 24, 48, 12);
+      deco.fillRect(cx - 24, cy + 12, 48, 12);
+      deco.fillStyle(body, 1);
+      deco.fillRect(cx - 24, cy - 12, 48, 24);
+      deco.fillStyle(turret, 1);
+      deco.fillRect(cx - 5, cy - 52, 10, 40);
+      deco.fillCircle(cx, cy, 15);
+      deco.fillStyle(body, 1);
+      deco.fillCircle(cx, cy, 8);
+    };
+    drawSymbol(w / 2 - 46, COLORS.PLAYER_BODY, COLORS.PLAYER_TRACK, COLORS.PLAYER_TURRET);
+    drawSymbol(w / 2 + 46, COLORS.P2_BODY, COLORS.P2_TRACK, COLORS.P2_TURRET);
 
     const textStyle = { fontFamily: "sans-serif", color: COLORS.HUD_CSS };
 
     this.add
-      .text(w / 2, h / 2 - 30, "BLOCK TANKS（仮）", {
+      .text(w / 2, h / 2 - 56, "BLOCK TANKS（仮）", {
         ...textStyle,
-        fontSize: "48px",
+        fontSize: "44px",
         fontStyle: "bold",
       })
       .setOrigin(0.5);
 
     this.add
-      .text(w / 2, h / 2 + 16, "壁に弾を反射させて敵戦車を撃ち抜け", {
+      .text(w / 2, h / 2 - 16, "壁に弾を反射させて敵戦車を撃ち抜け", {
         ...textStyle,
-        fontSize: "16px",
+        fontSize: "15px",
       })
       .setOrigin(0.5);
 
+    // 操作説明（1P／2P。GDD §3・§12.5）
     this.add
       .text(
         w / 2,
-        h / 2 + 78,
-        "WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃\nスペース・右クリック: 地雷 ／ Esc・P: ポーズ ／ R: リスタート ／ M: 消音",
-        { ...textStyle, fontSize: "15px", align: "center", lineSpacing: 8 },
+        h / 2 + 44,
+        "【1P】WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ スペース・右クリック: 地雷\n" +
+          "【2P】パッド: 左スティック移動・右スティック照準・RB射撃・LB地雷\n" +
+          "　　　（パッド未接続時: 矢印キー移動・IJKL照準・Enter射撃・右Shift地雷）\n" +
+          "共通: Esc・P: ポーズ ／ R: リスタート ／ M: 消音",
+        { ...textStyle, fontSize: "14px", align: "center", lineSpacing: 6 },
       )
       .setOrigin(0.5);
 
+    // モード選択（クリックまたは 1 / 2 キー）
+    const start = (playerCount: number): void => {
+      SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）
+      this.scene.start("GameScene", { playerCount });
+    };
+    const buttonStyle = {
+      ...textStyle,
+      fontSize: "22px",
+      fontStyle: "bold",
+      backgroundColor: "#343b4d",
+      padding: { x: 18, y: 8 },
+    };
+    this.add
+      .text(w / 2 - 130, h / 2 + 140, "[1] 1人で出撃", buttonStyle)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => start(1));
+    this.add
+      .text(w / 2 + 130, h / 2 + 140, "[2] 2人で出撃", buttonStyle)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => start(2));
+
+    const kb = this.input.keyboard;
+    kb?.on("keydown-ONE", () => start(1));
+    kb?.on("keydown-TWO", () => start(2));
+
     const prompt = this.add
-      .text(w / 2, h / 2 + 150, "クリックで開始", {
+      .text(w / 2, h / 2 + 196, "クリックまたは 1 / 2 キーで選択", {
         ...textStyle,
-        fontSize: "20px",
-        fontStyle: "bold",
+        fontSize: "15px",
       })
       .setOrigin(0.5);
 
@@ -84,11 +118,6 @@ export class TitleScene extends Phaser.Scene {
       duration: 700,
       yoyo: true,
       repeat: -1,
-    });
-
-    this.input.once("pointerdown", () => {
-      SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）
-      this.scene.start("GameScene");
     });
   }
 }

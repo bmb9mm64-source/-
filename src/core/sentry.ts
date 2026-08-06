@@ -5,10 +5,10 @@
  */
 import { BALANCE } from "../config/balance";
 import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
-import { hasLineOfSight } from "./los";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
 import { findOuterWallRicochet } from "./ricochetAim";
 import type { ParsedStage } from "./stage";
+import { selectTarget, type TargetInfo } from "./targeting";
 import type { TankBody } from "./types";
 
 /** セントリーの状態名 */
@@ -53,7 +53,7 @@ export function createSentry(x: number, y: number, rng: Rng): SentryTank {
 
 /** updateSentry に渡す周辺情報 */
 export interface SentryUpdateContext {
-  player: { x: number; y: number }; // プレイヤー位置
+  players: readonly TargetInfo[]; // 全プレイヤー（生存判定を含む。標的選択に使う。GDD §12.5）
   bullets: Bullet[]; // 場の弾（発射先・同時発射数カウント）
   stage: ParsedStage;
   grace: number; // 開幕グレースの残り時間 [s]（>0 の間は撃たない）
@@ -62,14 +62,15 @@ export interface SentryUpdateContext {
 
 /**
  * セントリーの更新。
- * どの状態でも砲塔は狙い（通常はプレイヤー、跳弾狙撃中は反射点）へ追従し、±数度のブレを載せる。
+ * 標的は「生存プレイヤーのうち射線が通る最も近い1体」。全員遮蔽なら最も近い生存者を照準追従のみ
+ * （GDD §12.5。1人プレイでは従来と同じ挙動）。
+ * どの状態でも砲塔は狙い（通常は標的、跳弾狙撃中は反射点）へ追従し、±数度のブレを載せる。
  * 発射条件（GDD v0.2 §6）：発射間隔消化・同時1発・砲塔が狙い方向 ±0.15rad 以内・射線が通る。
- * 跳弾狙撃（GDD §6 v0.4）：直接射線が塞がれているとき、AIM 突入ごとに1回だけ抽選（20%）し、
+ * 跳弾狙撃（GDD §6 v0.4）：標的への直接射線が塞がれているとき、AIM 突入ごとに1回だけ抽選（20%）し、
  * 当たれば外周壁1回反射の射線を毎フレーム再計算して反射点方向へ撃つ。直接射線があれば常に通常射撃を優先。
  */
 export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext): void {
   const c = BALANCE.SENTRY;
-  const p = ctx.player;
 
   // --- 照準ブレの引き直し（全状態共通） ---
   e.jitterTimer -= dt;
@@ -78,9 +79,14 @@ export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext
     e.jitterTimer = randRange(ctx.rng, c.JITTER_INTERVAL_MIN, c.JITTER_INTERVAL_MAX);
   }
 
-  // --- 狙いの決定：直接射線があればプレイヤー、なければ（抽選成立時のみ）跳弾の反射点 ---
+  // --- 標的選択（GDD §12.5）。生存者がいなければ何もしない（同フレーム内でリセットされる） ---
+  const pick = selectTarget(ctx.stage, e.x, e.y, ctx.players);
+  if (!pick) return;
+  const p = pick.target;
+
+  // --- 狙いの決定：直接射線があれば標的、なければ（抽選成立時のみ）跳弾の反射点 ---
   const toPlayer = Math.atan2(p.y - e.y, p.x - e.x);
-  const direct = hasLineOfSight(ctx.stage, e.x, e.y, p.x, p.y);
+  const direct = pick.hasLos;
   if (e.state === "AIM" && !e.ricochetRolled) {
     // AIM 突入後の初回フレームで抽選を1回だけ消化（リロードごと）
     e.ricochetRolled = true;

@@ -23,5 +23,6 @@ export interface TankBody {
 /** プレイヤー戦車 */
 export interface PlayerTank extends TankBody {
   kind: "player";
+  index: number; // プレイヤー番号（0=1P、1=2P。配色・HUD 表示用）
   cooldown: number; // 次弾発射可能までの残り時間 [s]
 }

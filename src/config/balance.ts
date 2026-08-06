@@ -16,8 +16,16 @@ export const BALANCE = {
     SIZE: 28, // 車体当たり判定（正方形の辺長）[px]
     RADIUS: 14, // 対弾用の円近似半径 [px]（28×28 の円近似）
     FIRE_INTERVAL: 0.3, // 発射間隔 [s]
-    MAX_BULLETS: 5, // 同時発射数上限
+    MAX_BULLETS: 5, // 同時発射数上限（プレイヤーごとに独立。GDD §12.5）
     BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用。GDD「滑らかに回転」）
+    TURRET_TURN_SPEED_KEYS: (540 * Math.PI) / 180, // 2P キーボード照準（IJKL）時の砲塔回転追従速度 [rad/s]（GDD §12.5「押した方向へ回転追従」。速度は本ファイルの調整値）
+  },
+
+  INPUT: {
+    // 2P ゲームパッド入力（GDD §12.5。Gamepad API＝ブラウザのコントローラ対応機能）
+    GAMEPAD_DEADZONE: 0.25, // スティックのデッドゾーン（中央付近の遊び。傾き量がこの値未満は入力なし扱い）
+    GAMEPAD_FIRE_BUTTON: 5, // 射撃ボタン（標準マッピングの R1/RB）
+    GAMEPAD_MINE_BUTTON: 4, // 地雷ボタン（標準マッピングの L1/LB）
   },
 
   BULLET: {
@@ -75,7 +83,8 @@ export const BALANCE = {
   },
 
   GAME: {
-    LIVES: 3, // 初期残機（GDD §8）
+    LIVES: 3, // 初期残機（GDD §8。2P 協力時も2人で共有・初期3のまま：GDD §12.5）
+    MAX_PLAYERS: 2, // 最大プレイヤー数（ローカル2P協力。GDD §12.5）
     START_GRACE: 1.0, // ステージ開始後、敵が射撃しない時間 [s]（開幕即死防止）
     BANNER_TIME: 2.0, // 「MISSION n」表示時間 [s]（GDD §8）
   },
@@ -116,6 +125,9 @@ export const COLORS = {
   PLAYER_BODY: 0x2f6fd0,
   PLAYER_TRACK: 0x1d4587,
   PLAYER_TURRET: 0x7fb2ff,
+  P2_BODY: 0x2fa05a, // 2P は緑系のオリジナル配色（1P＝青系と識別。GDD §12.5）
+  P2_TRACK: 0x1d6b3a,
+  P2_TURRET: 0x8fe6b0,
   ENEMY_BODY: 0xd07a2f,
   ENEMY_TRACK: 0x8a4d15,
   ENEMY_TURRET: 0xffc07f,

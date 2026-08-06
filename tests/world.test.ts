@@ -2,10 +2,12 @@
  * GameWorld のミッション進行のテスト（GDD §8）。
  * バナー2秒→開始、クリアで次ミッション、被弾で現ミッションリセット（残機持ち越し）、
  * 残機0でゲームオーバー、全ミッションクリアで allclear、撃破数の累積、地雷設置入力。
+ * ※1人プレイのセマンティクス（挙動）は2P対応後も不変であることをここで担保する。
  */
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
-import { GameWorld, type MissionDef, type WorldInput } from "../src/core/world";
+import type { PlayerInput } from "../src/core/input";
+import { GameWorld, type MissionDef } from "../src/core/world";
 import { makeBullet } from "./helpers";
 
 const rngHalf = (): number => 0.5;
@@ -16,13 +18,20 @@ const MISSION_A: MissionDef = { name: "TEST-A", grid: ["#####", "#P.A#", "#####"
 const MISSION_B: MissionDef = { name: "TEST-B", grid: ["#####", "#P.A#", "#####"] };
 const MISSIONS2 = [MISSION_A, MISSION_B];
 
-function idleInput(overrides: Partial<WorldInput> = {}): WorldInput {
-  return { moveX: 0, moveY: 0, aimX: 48, aimY: 48, fire: false, placeMine: false, ...overrides };
+function idleInput(overrides: Partial<PlayerInput> = {}): PlayerInput {
+  return {
+    moveX: 0,
+    moveY: 0,
+    aim: { mode: "cursor", x: 48, y: 48 },
+    fire: false,
+    placeMine: false,
+    ...overrides,
+  };
 }
 
 /** バナー（2秒）を消化してプレイ状態にする */
 function skipBanner(world: GameWorld): void {
-  world.update(BALANCE.GAME.BANNER_TIME + 0.01, idleInput());
+  world.update(BALANCE.GAME.BANNER_TIME + 0.01, [idleInput()]);
   expect(world.status).toBe("playing");
 }
 
@@ -31,7 +40,7 @@ function killAllEnemies(world: GameWorld): void {
   for (const e of world.enemies) {
     if (e.alive) world.bullets.push(makeBullet({ x: e.x, y: e.y }));
   }
-  world.update(0.016, idleInput());
+  world.update(0.016, [idleInput()]);
 }
 
 describe("ミッション進行（GameWorld）", () => {
@@ -39,11 +48,18 @@ describe("ミッション進行（GameWorld）", () => {
     const world = new GameWorld(MISSIONS2, rngHalf);
     expect(world.status).toBe("banner");
     expect(world.missionIndex).toBe(0);
-    world.update(1.0, idleInput());
+    world.update(1.0, [idleInput()]);
     expect(world.status).toBe("banner"); // まだ1秒
-    world.update(1.01, idleInput());
+    world.update(1.01, [idleInput()]);
     expect(world.status).toBe("playing");
     expect(world.grace).toBe(BALANCE.GAME.START_GRACE); // 開始後1秒は敵が撃たない
+  });
+
+  it("1人プレイでは players は1人だけで、player は players[0] を指す", () => {
+    const world = new GameWorld(MISSIONS2, rngHalf);
+    expect(world.players).toHaveLength(1);
+    expect(world.player).toBe(world.players[0]);
+    expect(world.player.index).toBe(0);
   });
 
   it("敵を全滅させると次ミッションのバナーへ進み、撃破数が累積する", () => {
@@ -74,7 +90,7 @@ describe("ミッション進行（GameWorld）", () => {
     killAllEnemies(world); // M1 クリア（kills=1）
     skipBanner(world); // M2 開始
     world.bullets.push(makeBullet({ x: world.player.x, y: world.player.y }));
-    world.update(0.016, idleInput());
+    world.update(0.016, [idleInput()]);
     expect(world.events).toContain("playerHit");
     expect(world.lives).toBe(BALANCE.GAME.LIVES - 1);
     expect(world.status).toBe("banner"); // 現ミッションのやり直し
@@ -88,7 +104,7 @@ describe("ミッション進行（GameWorld）", () => {
     world.kills = 4;
     world.lives = 1;
     world.bullets.push(makeBullet({ x: world.player.x, y: world.player.y }));
-    world.update(0.016, idleInput());
+    world.update(0.016, [idleInput()]);
     expect(world.status).toBe("gameover");
     expect(world.events).toContain("gameOver");
     world.resetGame(); // R またはクリック
@@ -101,7 +117,7 @@ describe("ミッション進行（GameWorld）", () => {
   it("バナー表示中はプレイヤー入力（移動・射撃・地雷）を受け付けない", () => {
     const world = new GameWorld(MISSIONS2, rngHalf);
     const x0 = world.player.x;
-    world.update(0.5, idleInput({ moveX: 1, fire: true, placeMine: true }));
+    world.update(0.5, [idleInput({ moveX: 1, fire: true, placeMine: true })]);
     expect(world.status).toBe("banner");
     expect(world.player.x).toBe(x0);
     expect(world.bullets).toHaveLength(0);
@@ -111,11 +127,28 @@ describe("ミッション進行（GameWorld）", () => {
   it("地雷設置入力で自位置に設置され、同時2個までに制限される", () => {
     const world = new GameWorld(MISSIONS2, rngHalf);
     skipBanner(world);
-    world.update(0.016, idleInput({ placeMine: true }));
+    world.update(0.016, [idleInput({ placeMine: true })]);
     expect(world.events).toContain("minePlaced");
-    world.update(0.016, idleInput({ placeMine: true }));
-    world.update(0.016, idleInput({ placeMine: true })); // 3個目は不発
+    world.update(0.016, [idleInput({ placeMine: true })]);
+    world.update(0.016, [idleInput({ placeMine: true })]); // 3個目は不発
     expect(world.mines).toHaveLength(2);
     expect(world.mines[0]!.x).toBe(world.player.x);
+  });
+
+  it("砲塔の角度指定照準：instant=true は即応、instant=false は回転追従する", () => {
+    const world = new GameWorld(MISSIONS2, rngHalf);
+    skipBanner(world);
+    // 即応（パッド右スティック相当）
+    world.update(0.016, [idleInput({ aim: { mode: "angle", angle: Math.PI / 2, instant: true } })]);
+    expect(world.player.turretAngle).toBe(Math.PI / 2);
+    // 回転追従（IJKL 相当）：1フレームでは目標まで届かず、途中の角度になる
+    world.update(0.016, [idleInput({ aim: { mode: "angle", angle: -Math.PI / 2, instant: false } })]);
+    const maxStep = BALANCE.PLAYER.TURRET_TURN_SPEED_KEYS * 0.016;
+    expect(world.player.turretAngle).not.toBe(-Math.PI / 2);
+    expect(Math.abs(world.player.turretAngle - Math.PI / 2)).toBeLessThanOrEqual(maxStep + 1e-9);
+    // aim=none では現在の向きを維持する
+    const before = world.player.turretAngle;
+    world.update(0.016, [idleInput({ aim: { mode: "none" } })]);
+    expect(world.player.turretAngle).toBe(before);
   });
 });

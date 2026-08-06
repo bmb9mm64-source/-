@@ -106,7 +106,7 @@ function runFrames(
 ): void {
   const dt = 1 / 60;
   for (let t = 0; t < seconds; t += dt) {
-    updateSentry(s, dt, { player, bullets, stage, grace: 0, rng });
+    updateSentry(s, dt, { players: [{ ...player, alive: true }], bullets, stage, grace: 0, rng });
   }
 }
 

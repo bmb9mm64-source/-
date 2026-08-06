@@ -7,27 +7,25 @@
  *   → 全滅でクリア → 次ミッションの banner → … → 最終ミッションクリアで allclear。
  *   被弾で残機-1し現ミッションを banner からやり直し。残機0で gameover。
  *   残機・撃破数はミッションをまたいで持ち越す（撃破数は累積）。
+ *
+ * ローカル2P協力（GDD §12.5）：
+ *   - players は 1〜2 人。弾5発・地雷2個の上限はプレイヤーごとに独立（owner 単位のカウント）。
+ *   - 残機は共有。被弾したプレイヤーはそのミッション中退場（alive=false）し、
+ *     全員退場した時点で残機-1＋現ミッションをリセット。片方生存のままクリアすれば
+ *     次ミッションで全員復帰（loadMission が全員を作り直す）。
+ *   - 2P の初期位置は GDD 未記載のため P1 の隣接床タイル（stage.findNearbyFloor の暫定解釈）。
  */
 import { BALANCE } from "../config/balance";
 import { type Bullet, bulletHitsTank, resolveBulletVsBullet, updateBullet } from "./bullet";
 import { tryFire } from "./firing";
+import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
 import { type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
 import { createRover, type RoverTank, updateRover } from "./rover";
 import { createSentry, type SentryTank, updateSentry } from "./sentry";
-import { type ParsedStage, parseStage } from "./stage";
+import { findNearbyFloor, type ParsedStage, parseStage } from "./stage";
 import { moveTank } from "./tank";
 import type { PlayerTank } from "./types";
-
-/** 1フレーム分のプレイヤー入力（シーンから渡す） */
-export interface WorldInput {
-  moveX: number; // -1 / 0 / +1（A・D）
-  moveY: number; // -1 / 0 / +1（W・S）
-  aimX: number; // 照準位置（ワールド座標 px）
-  aimY: number;
-  fire: boolean; // このフレームに発射要求があるか（1クリック1発）
-  placeMine: boolean; // このフレームに地雷設置要求があるか（1押下1設置）
-}
 
 /** ワールドの進行状態（ポーズはシーン側の責務なので含まない） */
 export type GameStatus = "banner" | "playing" | "gameover" | "allclear";
@@ -47,16 +45,17 @@ export type WorldEvent =
   | "bounce" // 跳弾反射
   | "cancel" // 弾同士の相殺
   | "tankDestroyed" // 敵戦車の撃破
-  | "playerHit" // プレイヤー被弾
+  | "playerHit" // プレイヤー被弾（2P では被弾した人数ぶん発生）
   | "minePlaced" // 地雷設置
   | "mineExploded" // 地雷起爆
   | "missionClear" // ミッションクリア
   | "gameOver" // ゲームオーバー
   | "allClear"; // 全ミッションクリア
 
-function createPlayer(x: number, y: number): PlayerTank {
+function createPlayer(x: number, y: number, index: number): PlayerTank {
   return {
     kind: "player",
+    index,
     x,
     y,
     bodyAngle: 0,
@@ -71,15 +70,16 @@ function createPlayer(x: number, y: number): PlayerTank {
 /** ゲームワールド */
 export class GameWorld {
   readonly missions: readonly MissionDef[];
+  readonly playerCount: number; // 1（従来）または 2（ローカル協力。GDD §12.5）
   missionIndex = 0;
   stage!: ParsedStage; // 現ミッションの盤面（X 破壊で書き換わるためミッション開始ごとに再解析）
   stageVersion = 0; // 盤面の描画キャッシュ更新用（ミッション切替・X 破壊で増える）
   status: GameStatus = "banner";
   bannerTimer = 0; // 「MISSION n」表示の残り時間 [s]
-  lives: number = BALANCE.GAME.LIVES;
+  lives: number = BALANCE.GAME.LIVES; // 残機（2P でも共有。GDD §12.5）
   kills = 0; // 撃破数（累積。ミッション・被弾をまたいで持ち越し）
   grace: number = BALANCE.GAME.START_GRACE; // 敵が撃たない残り時間 [s]
-  player!: PlayerTank;
+  players: PlayerTank[] = [];
   enemies: EnemyTank[] = [];
   bullets: Bullet[] = [];
   mines: Mine[] = [];
@@ -88,14 +88,20 @@ export class GameWorld {
 
   private readonly rng: Rng;
 
-  constructor(missions: readonly MissionDef[], rng: Rng = Math.random) {
+  constructor(missions: readonly MissionDef[], rng: Rng = Math.random, playerCount = 1) {
     if (missions.length === 0) throw new Error("ミッションが1つもありません");
     this.missions = missions;
     this.rng = rng;
+    this.playerCount = Math.min(Math.max(1, Math.floor(playerCount)), BALANCE.GAME.MAX_PLAYERS);
     this.resetGame();
   }
 
-  /** 指定ミッションを読み込み、「MISSION n」バナー状態から開始する */
+  /** 1P（後方互換用の別名。1人プレイのコード・テストはこれを参照してよい） */
+  get player(): PlayerTank {
+    return this.players[0]!;
+  }
+
+  /** 指定ミッションを読み込み、「MISSION n」バナー状態から開始する。全プレイヤーが復帰する */
   loadMission(index: number): void {
     this.missionIndex = index;
     const def = this.missions[index]!;
@@ -105,7 +111,13 @@ export class GameWorld {
       rows: def.grid.length,
     });
     this.stageVersion++;
-    this.player = createPlayer(this.stage.playerSpawn.x, this.stage.playerSpawn.y);
+    // P1 はステージの P、2P 以降は隣接床タイルに湧く（GDD §12.5 未記載の暫定解釈）
+    this.players = [];
+    let spawn = this.stage.playerSpawn;
+    for (let i = 0; i < this.playerCount; i++) {
+      if (i > 0) spawn = findNearbyFloor(this.stage, this.stage.playerSpawn);
+      this.players.push(createPlayer(spawn.x, spawn.y, i));
+    }
     this.enemies = [
       ...this.stage.sentrySpawns.map((sp) => createSentry(sp.x, sp.y, this.rng)),
       ...this.stage.roverSpawns.map((sp) => createRover(sp.x, sp.y, this.rng)),
@@ -124,9 +136,11 @@ export class GameWorld {
     this.loadMission(0);
   }
 
-  /** プレイヤー被弾：残機-1。0でゲームオーバー、残っていれば現ミッションをやり直し */
-  private onPlayerHit(): void {
-    this.events.push("playerHit");
+  /**
+   * 全プレイヤー退場：残機-1（残機は共有。GDD §12.5）。
+   * 0でゲームオーバー、残っていれば現ミッションをやり直し（全員復帰）。
+   */
+  private onAllPlayersDown(): void {
     this.lives--;
     if (this.lives <= 0) {
       this.status = "gameover";
@@ -141,8 +155,11 @@ export class GameWorld {
     return this.enemies.filter((e) => e.alive).length;
   }
 
-  /** 1フレーム分の更新（dt は秒。フレームレート非依存） */
-  update(dt: number, input: WorldInput): void {
+  /**
+   * 1フレーム分の更新（dt は秒。フレームレート非依存）。
+   * inputs はプレイヤー番号順（[0]=1P、[1]=2P）。不足分は入力なしとして扱う。
+   */
+  update(dt: number, inputs: readonly PlayerInput[]): void {
     this.events = [];
     this.lastExplosions = [];
 
@@ -157,39 +174,53 @@ export class GameWorld {
     }
     if (this.status !== "playing") return;
 
-    const p = this.player;
-
     // --- グレースタイマー ---
     if (this.grace > 0) this.grace -= dt;
 
-    // --- プレイヤー移動（8方向・斜めは正規化） ---
-    const mx = input.moveX;
-    const my = input.moveY;
-    if (mx !== 0 || my !== 0) {
-      const len = Math.hypot(mx, my); // 斜め入力の速度正規化
-      const dx = (mx / len) * BALANCE.PLAYER.SPEED * dt;
-      const dy = (my / len) * BALANCE.PLAYER.SPEED * dt;
-      moveTank(p, dx, dy, this.enemies, this.stage);
-      // 車体を移動方向へ滑らかに回転（演出。移動速度には影響しない）
-      const moveAngle = Math.atan2(my, mx);
-      p.bodyAngle = rotateToward(p.bodyAngle, moveAngle, BALANCE.PLAYER.BODY_TURN_SPEED * dt);
-    }
+    // --- プレイヤー入力の処理（退場中のプレイヤーは受け付けない） ---
+    for (let i = 0; i < this.players.length; i++) {
+      const p = this.players[i]!;
+      if (!p.alive) continue;
+      const input = inputs[i] ?? idlePlayerInput();
 
-    // --- 砲塔照準（マウスへ常時追従）と射撃 ---
-    p.turretAngle = Math.atan2(input.aimY - p.y, input.aimX - p.x);
-    if (p.cooldown > 0) p.cooldown -= dt;
-    if (input.fire) {
-      // 1クリック1発（条件を満たさなければ不発）
-      const fired = tryFire(p, this.bullets, p.turretAngle, {
-        fireInterval: BALANCE.PLAYER.FIRE_INTERVAL,
-        maxBullets: BALANCE.PLAYER.MAX_BULLETS,
-      });
-      if (fired) this.events.push("fire");
-    }
+      // 移動（8方向・斜めは正規化）。他プレイヤー・敵は通り抜け不可（GDD §5.5）
+      const mx = input.moveX;
+      const my = input.moveY;
+      if (mx !== 0 || my !== 0) {
+        const len = Math.hypot(mx, my); // 斜め入力の速度正規化
+        const dx = (mx / len) * BALANCE.PLAYER.SPEED * dt;
+        const dy = (my / len) * BALANCE.PLAYER.SPEED * dt;
+        const blockers = [...this.players.filter((o) => o !== p), ...this.enemies];
+        moveTank(p, dx, dy, blockers, this.stage);
+        // 車体を移動方向へ滑らかに回転（演出。移動速度には影響しない）
+        const moveAngle = Math.atan2(my, mx);
+        p.bodyAngle = rotateToward(p.bodyAngle, moveAngle, BALANCE.PLAYER.BODY_TURN_SPEED * dt);
+      }
 
-    // --- 地雷設置（スペース／右クリック。同時2個まで） ---
-    if (input.placeMine) {
-      if (tryPlaceMine(this.mines, p) !== null) this.events.push("minePlaced");
+      // 砲塔照準（GDD §3・§12.5。方式は PlayerAim を参照）
+      const aim = input.aim;
+      if (aim.mode === "cursor") {
+        p.turretAngle = Math.atan2(aim.y - p.y, aim.x - p.x); // マウス：即時追従
+      } else if (aim.mode === "angle") {
+        p.turretAngle = aim.instant
+          ? aim.angle // パッド右スティック：傾けた方向へ即応
+          : rotateToward(p.turretAngle, aim.angle, BALANCE.PLAYER.TURRET_TURN_SPEED_KEYS * dt); // IJKL：回転追従
+      } // "none"：現在の向きを維持
+
+      // 射撃（1押下1発。弾上限はプレイヤーごとに独立＝owner 単位）
+      if (p.cooldown > 0) p.cooldown -= dt;
+      if (input.fire) {
+        const fired = tryFire(p, this.bullets, p.turretAngle, {
+          fireInterval: BALANCE.PLAYER.FIRE_INTERVAL,
+          maxBullets: BALANCE.PLAYER.MAX_BULLETS,
+        });
+        if (fired) this.events.push("fire");
+      }
+
+      // 地雷設置（同時2個まで。上限はプレイヤーごとに独立＝owner 単位）
+      if (input.placeMine) {
+        if (tryPlaceMine(this.mines, p) !== null) this.events.push("minePlaced");
+      }
     }
 
     // --- 敵AI（発射数は前後差分で数えて効果音イベントにする） ---
@@ -198,7 +229,7 @@ export class GameWorld {
       if (!e.alive) continue;
       if (e.kind === "sentry") {
         updateSentry(e, dt, {
-          player: p,
+          players: this.players,
           bullets: this.bullets,
           stage: this.stage,
           grace: this.grace,
@@ -206,9 +237,9 @@ export class GameWorld {
         });
       } else {
         updateRover(e, dt, {
-          player: p,
+          players: this.players,
           bullets: this.bullets,
-          blockers: [p, ...this.enemies.filter((o) => o !== e)],
+          blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
           stage: this.stage,
           grace: this.grace,
           rng: this.rng,
@@ -231,25 +262,36 @@ export class GameWorld {
     const cancelledCount = aliveBulletsBefore - this.bullets.filter((b) => !b.dead).length;
     for (let i = 0; i < cancelledCount; i += 2) this.events.push("cancel");
 
+    // --- 被弾検出用スナップショット（地雷・弾での死亡をまとめて差分で数える） ---
+    const playersAliveBefore = this.players.map((p) => p.alive);
+
     // --- 地雷（起爆・誘爆・爆風による戦車/弾/X壁の破壊） ---
     const enemiesAliveBefore = this.enemiesLeft();
-    const mineResult = updateMines(this.mines, dt, [p, ...this.enemies], this.bullets, this.stage);
+    const mineResult = updateMines(
+      this.mines,
+      dt,
+      [...this.players, ...this.enemies],
+      this.bullets,
+      this.stage,
+    );
     for (let i = 0; i < mineResult.explosions.length; i++) this.events.push("mineExploded");
     this.lastExplosions = mineResult.explosions;
     if (mineResult.wallsDestroyed > 0) this.stageVersion++; // 盤面が変わった（描画更新用）
     this.mines = this.mines.filter((m) => !m.dead);
 
-    // --- 弾 vs 戦車 ---
-    let playerWasHit = !p.alive; // 爆風で既に倒れている場合
+    // --- 弾 vs 戦車（弾は発射者を問わず全戦車に当たる＝フレンドリーファイアあり。GDD §5・§12.5） ---
     for (const b of this.bullets) {
       if (b.dead) continue;
-      if (p.alive && bulletHitsTank(b, p)) {
-        // 自分の弾でも当たる（自爆あり）
-        b.dead = true;
-        p.alive = false;
-        playerWasHit = true;
-        continue;
+      let consumed = false;
+      for (const p of this.players) {
+        if (p.alive && bulletHitsTank(b, p)) {
+          b.dead = true;
+          p.alive = false; // 被弾したプレイヤーはそのミッション中退場
+          consumed = true;
+          break;
+        }
       }
+      if (consumed) continue;
       for (const e of this.enemies) {
         if (e.alive && bulletHitsTank(b, e)) {
           b.dead = true;
@@ -268,9 +310,14 @@ export class GameWorld {
     this.kills += killed;
     for (let i = 0; i < killed; i++) this.events.push("tankDestroyed");
 
-    // --- 勝敗判定（被弾を優先処理） ---
-    if (playerWasHit) {
-      this.onPlayerHit();
+    // --- プレイヤー被弾イベント（このフレームで倒れた人数ぶん） ---
+    for (let i = 0; i < this.players.length; i++) {
+      if (playersAliveBefore[i] && !this.players[i]!.alive) this.events.push("playerHit");
+    }
+
+    // --- 勝敗判定（全員退場を優先処理。片方生存なら続行。GDD §12.5） ---
+    if (!this.players.some((p) => p.alive)) {
+      this.onAllPlayersDown();
       return;
     }
     if (enemiesAliveAfter === 0) {
@@ -279,7 +326,7 @@ export class GameWorld {
         this.events.push("allClear");
       } else {
         this.events.push("missionClear");
-        this.loadMission(this.missionIndex + 1); // 次ミッションのバナーへ
+        this.loadMission(this.missionIndex + 1); // 次ミッションのバナーへ（退場者も復帰）
       }
     }
   }

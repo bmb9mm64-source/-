@@ -3,12 +3,20 @@
  * ロジック（移動・跳弾・AI・地雷・当たり判定・ミッション進行）はすべて src/core/ にあり、ここには置かない。
  * 描画はすべて Phaser Graphics のコード描画（外部アセット禁止・オリジナル配色）。
  * 効果音は src/audio/sfx.ts（Web Audio 自作合成）。ワールドのイベントを音に変換する。
+ *
+ * 入力（GDD §3・§12.5）：
+ *   1P … WASD 移動＋マウス照準＋左クリック射撃＋スペース/右クリック地雷（従来どおり）。
+ *   2P … ゲームパッド優先（毎フレーム接続確認・随時切替）。未接続時はキーボード分割：
+ *         矢印キー移動・IJKL 8方向照準・Enter 射撃・右Shift 地雷。
+ *   入力はすべて core の PlayerInput 型に正規化して GameWorld に渡す。
  */
 import Phaser from "phaser";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
+import { eightWayAngle, type PlayerInput } from "../core/input";
 import type { TankBody } from "../core/types";
-import { GameWorld, type WorldInput } from "../core/world";
+import { GameWorld } from "../core/world";
+import { GamepadPoller } from "../input/gamepad";
 import { MISSIONS } from "../stages/missions";
 
 /** 爆発フラッシュ演出（見た目のみ） */
@@ -20,9 +28,13 @@ interface ExplosionFx {
 
 export class GameScene extends Phaser.Scene {
   private world!: GameWorld;
+  private playerCount = 1; // TitleScene から渡されるモード（1 or 2）
   private paused = false; // ポーズはシーン側の責務（ポーズ中は world.update を呼ばない）
-  private fireRequested = false; // 1クリック1発の発射要求フラグ
-  private mineRequested = false; // 1押下1設置の地雷要求フラグ
+  private fireRequested = false; // 1P：1クリック1発の発射要求フラグ
+  private mineRequested = false; // 1P：1押下1設置の地雷要求フラグ
+  private fire2Requested = false; // 2P（キーボード Enter）
+  private mine2Requested = false; // 2P（キーボード 右Shift）
+  private gamepad = new GamepadPoller(); // 2P パッド（毎フレーム接続確認）
   private explosionsFx: ExplosionFx[] = [];
   private lastStageVersion = -1; // 盤面描画キャッシュの版（X 破壊・ミッション切替で再描画）
 
@@ -31,6 +43,16 @@ export class GameScene extends Phaser.Scene {
     a: Phaser.Input.Keyboard.Key;
     s: Phaser.Input.Keyboard.Key;
     d: Phaser.Input.Keyboard.Key;
+  };
+  private keys2!: {
+    up: Phaser.Input.Keyboard.Key;
+    left: Phaser.Input.Keyboard.Key;
+    down: Phaser.Input.Keyboard.Key;
+    right: Phaser.Input.Keyboard.Key;
+    i: Phaser.Input.Keyboard.Key;
+    j: Phaser.Input.Keyboard.Key;
+    k: Phaser.Input.Keyboard.Key;
+    l: Phaser.Input.Keyboard.Key;
   };
 
   private stageGfx!: Phaser.GameObjects.Graphics; // 盤面（版が変わった時のみ描き直し）
@@ -46,14 +68,18 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  create(): void {
+  create(data: { playerCount?: number } = {}): void {
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
 
-    this.world = new GameWorld(MISSIONS);
+    this.playerCount = data.playerCount === 2 ? 2 : 1;
+    this.world = new GameWorld(MISSIONS, Math.random, this.playerCount);
     this.paused = false;
     this.fireRequested = false;
     this.mineRequested = false;
+    this.fire2Requested = false;
+    this.mine2Requested = false;
+    this.gamepad = new GamepadPoller();
     this.explosionsFx = [];
     this.lastStageVersion = -1;
 
@@ -67,7 +93,7 @@ export class GameScene extends Phaser.Scene {
     this.dynGfx = this.add.graphics().setDepth(1);
     this.crosshairGfx = this.add.graphics().setDepth(20);
 
-    // --- HUD（ミッション番号・残機・撃破数。GDD §8） ---
+    // --- HUD（ミッション番号・残機・撃破数＋2P 時は P1/P2 の生存状態。GDD §8・§12.5） ---
     const hudStyle = {
       fontFamily: "sans-serif",
       fontSize: "15px",
@@ -110,6 +136,17 @@ export class GameScene extends Phaser.Scene {
       s: kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       d: kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
+    // 2P キーボード分割（パッド未接続時のフォールバック。GDD §12.5）
+    this.keys2 = {
+      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      left: kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+      right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
+      i: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+      j: kb.addKey(Phaser.Input.Keyboard.KeyCodes.J),
+      k: kb.addKey(Phaser.Input.Keyboard.KeyCodes.K),
+      l: kb.addKey(Phaser.Input.Keyboard.KeyCodes.L),
+    };
     // ポーズ切り替え（Esc / P）：プレイ中のみ有効
     const togglePause = (): void => {
       if (this.world.status === "playing") this.paused = !this.paused;
@@ -126,10 +163,22 @@ export class GameScene extends Phaser.Scene {
       this.world.resetGame();
       this.paused = false;
     });
-    // スペース：地雷設置（1押下1設置）
+    // スペース：1P 地雷設置（1押下1設置）
     kb.on("keydown-SPACE", () => {
       SFX.unlock();
       this.mineRequested = true;
+    });
+    // Enter：2P 射撃（1押下1発。2人プレイ時のみ）
+    kb.on("keydown-ENTER", () => {
+      if (this.playerCount !== 2) return;
+      SFX.unlock();
+      this.fire2Requested = true;
+    });
+    // 右Shift：2P 地雷設置（location===2 が右側の Shift。2人プレイ時のみ）
+    kb.on("keydown-SHIFT", (event: KeyboardEvent) => {
+      if (this.playerCount !== 2 || event.location !== 2) return;
+      SFX.unlock();
+      this.mine2Requested = true;
     });
     // M：効果音のミュート切替
     kb.on("keydown-M", () => {
@@ -137,7 +186,7 @@ export class GameScene extends Phaser.Scene {
       SFX.toggleMute();
     });
 
-    // クリック：射撃（左）／地雷（右）。終了画面では再開操作
+    // クリック：1P 射撃（左）／地雷（右）。終了画面では再開操作
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       SFX.unlock(); // 自動再生制限の解除（ユーザー操作後の初期化）
       if (this.world.status === "gameover") {
@@ -154,23 +203,46 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** 2P の入力を構築（パッド優先＋キーボード分割フォールバック。毎フレーム接続確認。GDD §12.5） */
+  private buildP2Input(): PlayerInput {
+    const pad = this.gamepad.poll();
+    if (pad.connected) {
+      return {
+        moveX: pad.moveX,
+        moveY: pad.moveY,
+        aim: pad.aimAngle !== null ? { mode: "angle", angle: pad.aimAngle, instant: true } : { mode: "none" },
+        fire: pad.firePressed,
+        placeMine: pad.minePressed,
+      };
+    }
+    // キーボードフォールバック：矢印移動＋IJKL 8方向照準（回転追従）＋Enter/右Shift
+    const k = this.keys2;
+    const aimAngle = eightWayAngle(k.i.isDown, k.j.isDown, k.k.isDown, k.l.isDown);
+    return {
+      moveX: (k.right.isDown ? 1 : 0) - (k.left.isDown ? 1 : 0),
+      moveY: (k.down.isDown ? 1 : 0) - (k.up.isDown ? 1 : 0),
+      aim: aimAngle !== null ? { mode: "angle", angle: aimAngle, instant: false } : { mode: "none" },
+      fire: this.fire2Requested,
+      placeMine: this.mine2Requested,
+    };
+  }
+
   override update(_time: number, deltaMs: number): void {
     // デルタタイム算出＋上限クランプ（フレームレート非依存・タブ復帰時の吹っ飛び防止）
     const dt = Math.min(deltaMs / 1000, BALANCE.DT_MAX);
     const pointer = this.input.activePointer;
 
     if (!this.paused) {
-      const input: WorldInput = {
+      const input1: PlayerInput = {
         moveX: (this.keys.d.isDown ? 1 : 0) - (this.keys.a.isDown ? 1 : 0),
         moveY: (this.keys.s.isDown ? 1 : 0) - (this.keys.w.isDown ? 1 : 0),
-        aimX: pointer.worldX,
-        aimY: pointer.worldY,
+        aim: { mode: "cursor", x: pointer.worldX, y: pointer.worldY },
         fire: this.fireRequested,
         placeMine: this.mineRequested,
       };
-      this.world.update(dt, input);
-      this.fireRequested = false; // 更新で消費（不発でも入力は消費）
-      this.mineRequested = false;
+      const inputs: PlayerInput[] = [input1];
+      if (this.playerCount === 2) inputs.push(this.buildP2Input());
+      this.world.update(dt, inputs);
 
       // ワールドの出来事を効果音・爆発演出に変換する
       for (const ev of this.world.events) SFX.play(ev);
@@ -178,6 +250,11 @@ export class GameScene extends Phaser.Scene {
         this.explosionsFx.push({ x: ex.x, y: ex.y, age: 0 });
       }
     }
+    // 押下エッジ要求は毎フレーム消費（不発・ポーズ中・パッド切替時も持ち越さない）
+    this.fireRequested = false;
+    this.mineRequested = false;
+    this.fire2Requested = false;
+    this.mine2Requested = false;
 
     // 爆発フラッシュの経過（ポーズ中は進めない）
     if (!this.paused) {
@@ -289,7 +366,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 戦車（セントリー＝橙／ローバー＝赤／プレイヤー＝青）
+    // 戦車（セントリー＝橙／ローバー＝赤／1P＝青／2P＝緑。退場者は描かない）
     for (const e of world.enemies) {
       if (!e.alive) continue;
       if (e.kind === "sentry") {
@@ -298,8 +375,13 @@ export class GameScene extends Phaser.Scene {
         this.drawTank(e, COLORS.ROVER_BODY, COLORS.ROVER_TRACK, COLORS.ROVER_TURRET);
       }
     }
-    if (world.player.alive) {
-      this.drawTank(world.player, COLORS.PLAYER_BODY, COLORS.PLAYER_TRACK, COLORS.PLAYER_TURRET);
+    for (const p of world.players) {
+      if (!p.alive) continue;
+      if (p.index === 0) {
+        this.drawTank(p, COLORS.PLAYER_BODY, COLORS.PLAYER_TRACK, COLORS.PLAYER_TURRET);
+      } else {
+        this.drawTank(p, COLORS.P2_BODY, COLORS.P2_TRACK, COLORS.P2_TURRET);
+      }
     }
 
     // 弾
@@ -318,8 +400,13 @@ export class GameScene extends Phaser.Scene {
       this.dynGfx.fillCircle(fx.x, fx.y, radius);
     }
 
-    // HUD（ミッション番号・残機・撃破数。GDD §8）
-    this.hudLeft.setText(`MISSION ${world.missionIndex + 1}/${world.missions.length}　残機: ${world.lives}`);
+    // HUD（ミッション番号・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§12.5）
+    let left = `MISSION ${world.missionIndex + 1}/${world.missions.length}　残機: ${world.lives}`;
+    if (this.playerCount === 2) {
+      const stateOf = (i: number): string => (world.players[i]?.alive ? "生存" : "退場");
+      left += `　P1: ${stateOf(0)}　P2: ${stateOf(1)}`;
+    }
+    this.hudLeft.setText(left);
     this.hudRight.setText(`撃破: ${world.kills}　敵: ${world.enemiesLeft()}${SFX.muted ? "　[消音]" : ""}`);
 
     // オーバーレイ
@@ -343,7 +430,7 @@ export class GameScene extends Phaser.Scene {
     this.overlayTitle.setVisible(showOverlay).setText(title);
     this.overlaySub.setVisible(showOverlay).setText(sub);
 
-    // 十字カーソル（オーバーレイより前面）
+    // 十字カーソル（1P マウス照準。オーバーレイより前面）
     const gfx = this.crosshairGfx;
     const x = pointer.worldX;
     const y = pointer.worldY;

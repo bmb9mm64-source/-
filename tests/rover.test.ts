@@ -14,7 +14,7 @@ const rngHalf = (): number => 0.5;
 /** プレイヤーは弾の owner 識別にも使うため、同一オブジェクトを ctx に渡す */
 function makeCtx(overrides: Partial<RoverUpdateContext> = {}): RoverUpdateContext {
   return {
-    player: { x: 80, y: 112 }, // ローバーの真下 → 初期砲塔角（下向き）と一致
+    players: [{ x: 80, y: 112, alive: true }], // ローバーの真下 → 初期砲塔角（下向き）と一致
     bullets: [] as Bullet[],
     blockers: [],
     stage,
@@ -75,7 +75,7 @@ describe("ローバーAI（ステートマシン）", () => {
       "#####",
     ]);
     const e = createRover(48, 48, rngHalf);
-    const ctx = makeCtx({ player: { x: 48, y: 112 }, stage: blockedStage });
+    const ctx = makeCtx({ players: [{ x: 48, y: 112, alive: true }], stage: blockedStage });
     for (let i = 0; i < 200; i++) updateRover(e, 0.05, ctx);
     expect(ctx.bullets).toHaveLength(0);
   });
@@ -98,12 +98,12 @@ describe("ローバーAI（ステートマシン）", () => {
   });
 
   it("プレイヤーの弾が接近すると DODGE に遷移し、時間経過で WANDER に戻る", () => {
-    const player = { x: 80, y: 140 };
+    const player = { x: 80, y: 140, alive: true };
     // rng=0.2：回避判定 0.2 < DODGE_CHANCE(0.35) → 回避成功
     const rngLow = (): number => 0.2;
     const e = createRover(80, 48, rngLow);
     const threat = makeBullet({ x: 80, y: 110, vx: 0, vy: -200, owner: player });
-    const ctx = makeCtx({ player, bullets: [threat], rng: rngLow });
+    const ctx = makeCtx({ players: [player], bullets: [threat], rng: rngLow });
     updateRover(e, 0.01, ctx);
     expect(e.state).toBe("DODGE");
     // DODGE_TIME（0.3s）経過で WANDER に戻る
@@ -112,12 +112,12 @@ describe("ローバーAI（ステートマシン）", () => {
   });
 
   it("回避の成功率は低め：乱数が DODGE_CHANCE を超えると回避しない", () => {
-    const player = { x: 80, y: 140 };
+    const player = { x: 80, y: 140, alive: true };
     // rng=0.9：0.9 > DODGE_CHANCE(0.35) → 回避失敗（WANDER のまま）
     const rngHigh = (): number => 0.9;
     const e = createRover(80, 48, rngHigh);
     const threat = makeBullet({ x: 80, y: 110, vx: 0, vy: -200, owner: player });
-    const ctx = makeCtx({ player, bullets: [threat], rng: rngHigh });
+    const ctx = makeCtx({ players: [player], bullets: [threat], rng: rngHigh });
     updateRover(e, 0.01, ctx);
     expect(e.state).toBe("WANDER");
     expect(e.dodgeCooldown).toBeGreaterThan(0); // 判定は消費（毎フレーム抽選しない）
@@ -133,13 +133,25 @@ describe("ローバーAI（ステートマシン）", () => {
   });
 
   it("遠ざかる弾では回避しない", () => {
-    const player = { x: 80, y: 140 };
+    const player = { x: 80, y: 140, alive: true };
     const rngLow = (): number => 0.2;
     const e = createRover(80, 48, rngLow);
     // ローバーの近くだが下向き（離れていく）弾
     const leaving = makeBullet({ x: 80, y: 80, vx: 0, vy: 200, owner: player });
-    const ctx = makeCtx({ player, bullets: [leaving], rng: rngLow });
+    const ctx = makeCtx({ players: [player], bullets: [leaving], rng: rngLow });
     updateRover(e, 0.01, ctx);
     expect(e.state).toBe("WANDER");
+  });
+
+  it("2P の弾でも回避する（プレイヤー弾は全員分を警戒。GDD §12.5）", () => {
+    const p1 = { x: 80, y: 140, alive: true };
+    const p2 = { x: 48, y: 140, alive: true };
+    const rngLow = (): number => 0.2;
+    const e = createRover(80, 48, rngLow);
+    // 2P（players[1]）所有の接近弾
+    const threat = makeBullet({ x: 80, y: 110, vx: 0, vy: -200, owner: p2 });
+    const ctx = makeCtx({ players: [p1, p2], bullets: [threat], rng: rngLow });
+    updateRover(e, 0.01, ctx);
+    expect(e.state).toBe("DODGE");
   });
 });
