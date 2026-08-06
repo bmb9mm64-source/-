@@ -44,6 +44,13 @@ export function spawnBullet(
   return b;
 }
 
+/** 敵弾の生成設定（GDD §6 v0.4：敵弾のみ 225px/s に強化。プレイヤー弾は BALANCE.BULLET のまま） */
+export const ENEMY_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.ENEMY_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+};
+
 /** owner が場に出している生存弾の数 */
 export function liveBulletCount(bullets: readonly Bullet[], owner: object): number {
   let n = 0;
@@ -90,7 +97,7 @@ function circleHitsWall(stage: ParsedStage, x: number, y: number, rad: number): 
  * 軸ごとに移動→衝突判定→該当軸の速度反転＋押し戻し。
  * 角で同フレームに両軸が反射しても反射回数は「1回」と数える。
  * 破壊可能壁 X に触れた弾は反射せず消滅する（GDD §5。壁は壊れない）。
- * ※弾速200px/s × dt上限0.05s = 最大10px/フレーム < タイル32px なので突き抜けは起きない。
+ * ※最大弾速225px/s（敵弾） × dt上限0.05s = 最大11.25px/フレーム < タイル32px なので突き抜けは起きない。
  */
 export function updateBullet(
   b: Bullet,

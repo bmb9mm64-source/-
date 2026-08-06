@@ -4,9 +4,10 @@
  * Phaser 非依存の純粋 TS。乱数は Rng を注入してテスト可能にする。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, liveBulletCount, spawnBullet } from "./bullet";
+import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
 import { hasLineOfSight } from "./los";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
+import { findOuterWallRicochet } from "./ricochetAim";
 import type { ParsedStage } from "./stage";
 import type { TankBody } from "./types";
 
@@ -20,6 +21,8 @@ export interface SentryTank extends TankBody {
   fireTimer: number; // 次に撃てるまでの残り時間 [s]
   jitter: number; // 現在の照準ブレ [rad]
   jitterTimer: number; // ブレ引き直しまでの残り時間 [s]
+  ricochetRolled: boolean; // このAIMサイクルで跳弾狙撃の抽選を消化したか
+  ricochetMode: boolean; // 抽選に当たり跳弾狙撃を試みているか（GDD §6 v0.4）
 }
 
 /** 次回発射間隔（平均±ゆらぎ）を引く */
@@ -43,6 +46,8 @@ export function createSentry(x: number, y: number, rng: Rng): SentryTank {
     fireTimer: sentryNextInterval(rng),
     jitter: 0,
     jitterTimer: 0,
+    ricochetRolled: false,
+    ricochetMode: false,
   };
 }
 
@@ -57,21 +62,36 @@ export interface SentryUpdateContext {
 
 /**
  * セントリーの更新。
- * どの状態でも砲塔はプレイヤーへ 90°/s で追従し、±数度のブレを載せる。
- * 発射条件（GDD v0.2 §6）：発射間隔消化・同時1発・砲塔がプレイヤー方向 ±0.15rad 以内・射線が通る。
+ * どの状態でも砲塔は狙い（通常はプレイヤー、跳弾狙撃中は反射点）へ追従し、±数度のブレを載せる。
+ * 発射条件（GDD v0.2 §6）：発射間隔消化・同時1発・砲塔が狙い方向 ±0.15rad 以内・射線が通る。
+ * 跳弾狙撃（GDD §6 v0.4）：直接射線が塞がれているとき、AIM 突入ごとに1回だけ抽選（20%）し、
+ * 当たれば外周壁1回反射の射線を毎フレーム再計算して反射点方向へ撃つ。直接射線があれば常に通常射撃を優先。
  */
 export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext): void {
   const c = BALANCE.SENTRY;
   const p = ctx.player;
 
-  // --- 照準（全状態共通）：ブレの引き直しと砲塔回転 ---
+  // --- 照準ブレの引き直し（全状態共通） ---
   e.jitterTimer -= dt;
   if (e.jitterTimer <= 0) {
     e.jitter = randRange(ctx.rng, -c.JITTER_MAX, c.JITTER_MAX);
     e.jitterTimer = randRange(ctx.rng, c.JITTER_INTERVAL_MIN, c.JITTER_INTERVAL_MAX);
   }
+
+  // --- 狙いの決定：直接射線があればプレイヤー、なければ（抽選成立時のみ）跳弾の反射点 ---
   const toPlayer = Math.atan2(p.y - e.y, p.x - e.x);
-  e.turretAngle = rotateToward(e.turretAngle, toPlayer + e.jitter, c.TURN_SPEED * dt);
+  const direct = hasLineOfSight(ctx.stage, e.x, e.y, p.x, p.y);
+  if (e.state === "AIM" && !e.ricochetRolled) {
+    // AIM 突入後の初回フレームで抽選を1回だけ消化（リロードごと）
+    e.ricochetRolled = true;
+    e.ricochetMode = !direct && ctx.rng() < c.RICOCHET_AIM_CHANCE;
+  }
+  const shot =
+    e.state === "AIM" && !direct && e.ricochetMode
+      ? findOuterWallRicochet(ctx.stage, e.x, e.y, p.x, p.y)
+      : null;
+  const aimTarget = shot ? shot.aimAngle : toPlayer;
+  e.turretAngle = rotateToward(e.turretAngle, aimTarget + e.jitter, c.TURN_SPEED * dt);
 
   // --- 状態遷移 ---
   switch (e.state) {
@@ -80,17 +100,19 @@ export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext
       break;
 
     case "AIM": {
-      // 発射条件が揃ったら撃つ
+      // 発射条件が揃ったら撃つ（通常＝直接射線あり／跳弾狙撃＝反射射線が成立）
       e.fireTimer -= dt;
       const ready =
         e.fireTimer <= 0 &&
         liveBulletCount(ctx.bullets, e) < c.MAX_BULLETS && // 同時1発
-        Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL && // 砲塔がほぼ狙い通り
-        hasLineOfSight(ctx.stage, e.x, e.y, p.x, p.y); // 射線が通っている
+        Math.abs(angleDiff(aimTarget, e.turretAngle)) < c.FIRE_ANGLE_TOL && // 砲塔がほぼ狙い通り
+        (direct || shot !== null); // 直接射線 or 跳弾射線のどちらかが成立
       if (ready) {
-        spawnBullet(ctx.bullets, e, e.turretAngle);
+        spawnBullet(ctx.bullets, e, e.turretAngle, ENEMY_BULLET_CFG);
         e.fireTimer = sentryNextInterval(ctx.rng);
         e.state = "RELOAD";
+        e.ricochetRolled = false; // 次の AIM サイクルで再抽選
+        e.ricochetMode = false;
       }
       break;
     }
@@ -100,6 +122,8 @@ export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext
       if (e.fireTimer <= 0) {
         e.fireTimer = 0;
         e.state = "AIM";
+        e.ricochetRolled = false; // AIM 復帰時に抽選をリセット
+        e.ricochetMode = false;
       }
       break;
   }

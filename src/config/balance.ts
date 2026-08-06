@@ -1,6 +1,6 @@
 /**
  * 調整値の一元管理（マジックナンバー禁止・CLAUDE.md 規約）。
- * 数値は GDD v0.2.1（docs/gdd.md）を正とする。GDD に明記のない細部
+ * 数値は GDD v0.4（docs/gdd.md）を正とする。GDD に明記のない細部
  * （ローバーの徘徊間隔・回避成功率、効果音の音量など）はここでの調整値とし、
  * プレイテストで更新する。単位：px＝ピクセル、s＝秒。角度はすべてラジアン。
  */
@@ -21,35 +21,37 @@ export const BALANCE = {
   },
 
   BULLET: {
-    SPEED: 200, // 弾速 [px/s]（GDD §4・§6）
+    SPEED: 200, // プレイヤー弾の弾速 [px/s]（GDD §4。v0.4 で敵弾と分離）
+    ENEMY_BULLET_SPEED: 225, // 敵弾（セントリー・ローバー）の弾速 [px/s]（GDD §6 v0.4：敵弾のみ強化）
     RADIUS: 4, // 弾の当たり判定半径 [px]
     MAX_BOUNCES: 1, // 反射上限（2回目の壁接触で消滅）
     MUZZLE_OFFSET: 22, // 砲口オフセット [px]（車体半径14+弾半径4 より外側 → 発射直後の自爆なし）
   },
 
   SENTRY: {
-    // 敵A「セントリー」（GDD §6）
+    // 敵A「セントリー」（GDD §6。v0.4 バランスパッチで強化）
     SIZE: 28,
     RADIUS: 14,
-    TURN_SPEED: Math.PI / 2, // 砲塔回転速度 90°/s
-    JITTER_MAX: (3 * Math.PI) / 180, // 照準の最大ブレ（±3°）
+    TURN_SPEED: (115 * Math.PI) / 180, // 砲塔回転速度 115°/s（v0.4：90→115）
+    JITTER_MAX: (2 * Math.PI) / 180, // 照準の最大ブレ（±2°。v0.4：±3→±2）
     JITTER_INTERVAL_MIN: 0.4, // ブレ量を引き直す間隔（最小）[s]
     JITTER_INTERVAL_MAX: 1.2, // ブレ量を引き直す間隔（最大）[s]
-    FIRE_INTERVAL_MEAN: 3.0, // 発射間隔の平均 [s]
-    FIRE_INTERVAL_VAR: 1.0, // 発射間隔のゆらぎ幅（±）[s]
+    FIRE_INTERVAL_MEAN: 2.2, // 発射間隔の平均 [s]（v0.4：3.0→2.2）
+    FIRE_INTERVAL_VAR: 0.8, // 発射間隔のゆらぎ幅（±）[s]（v0.4：±1.0→±0.8）
     MAX_BULLETS: 1, // 同時発射数上限
-    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（GDD v0.2 §6）
+    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（GDD v0.2 §6。跳弾狙撃時は反射点方向に適用）
+    RICOCHET_AIM_CHANCE: 0.2, // 跳弾狙撃を試みる確率（リロード完了ごとに抽選。GDD §6 v0.4）
   },
 
   ROVER: {
-    // 敵B「ローバー」（遊撃型。GDD §6）
+    // 敵B「ローバー」（遊撃型。GDD §6。v0.4 バランスパッチで強化）
     SIZE: 28,
     RADIUS: 14,
-    SPEED: 60, // 移動速度 [px/s]
-    TURN_SPEED: (2 * Math.PI) / 3, // 砲塔回転速度 120°/s
+    SPEED: 78, // 移動速度 [px/s]（v0.4：60→78）
+    TURN_SPEED: (150 * Math.PI) / 180, // 砲塔回転速度 150°/s（v0.4：120→150）
     BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用）
-    FIRE_INTERVAL_MEAN: 2.0, // 発射間隔の平均 [s]
-    FIRE_INTERVAL_VAR: 0.8, // 発射間隔のゆらぎ幅（±）[s]
+    FIRE_INTERVAL_MEAN: 1.5, // 発射間隔の平均 [s]（v0.4：2.0→1.5）
+    FIRE_INTERVAL_VAR: 0.6, // 発射間隔のゆらぎ幅（±）[s]（v0.4：±0.8→±0.6）
     MAX_BULLETS: 1, // 同時発射数上限
     FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
     RETARGET_INTERVAL_MIN: 1.5, // 徘徊目標を引き直す間隔（最小）[s]（GDD「数秒ごと」）
@@ -57,8 +59,8 @@ export const BALANCE = {
     ARRIVE_DIST: 8, // 目標到達とみなす距離 [px]
     STUCK_TIME: 0.25, // 壁・戦車に行き詰まったと判断するまでの時間 [s]
     WANDER_PICK_TRIES: 20, // 徘徊目標（床タイル）の抽選試行回数
-    DODGE_DETECT_RADIUS: 90, // プレイヤー弾の接近を検知する半径 [px]
-    DODGE_CHANCE: 0.35, // 回避を試みる確率（成功率は低め：GDD §6）
+    DODGE_DETECT_RADIUS: 110, // プレイヤー弾の接近を検知する半径 [px]（v0.4：90→110）
+    DODGE_CHANCE: 0.5, // 回避を試みる確率（GDD §6 v0.4：35%→50% に強化）
     DODGE_TIME: 0.3, // 回避移動の継続時間 [s]（「短い回避移動」）
     DODGE_COOLDOWN: 0.8, // 回避判定のクールダウン [s]（毎フレーム抽選しない）
   },

@@ -6,7 +6,7 @@
  * Phaser 非依存の純粋 TS。乱数は Rng を注入して決定的テスト可能。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, liveBulletCount, spawnBullet } from "./bullet";
+import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
 import { hasLineOfSight } from "./los";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
 import { type ParsedStage, tileAt } from "./stage";
@@ -176,7 +176,7 @@ export function updateRover(e: RoverTank, dt: number, ctx: RoverUpdateContext): 
     Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL && // 砲塔がほぼ狙い通り
     hasLineOfSight(ctx.stage, e.x, e.y, p.x, p.y); // 射線が通っている
   if (ready) {
-    spawnBullet(ctx.bullets, e, e.turretAngle);
+    spawnBullet(ctx.bullets, e, e.turretAngle, ENEMY_BULLET_CFG);
     e.fireTimer = roverNextInterval(ctx.rng);
   }
 }
