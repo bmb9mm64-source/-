@@ -3,6 +3,7 @@
  * 描画はすべてコード描画（外部アセット禁止・オリジナル配色）。
  */
 import Phaser from "phaser";
+import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 
 export class TitleScene extends Phaser.Scene {
@@ -63,7 +64,7 @@ export class TitleScene extends Phaser.Scene {
       .text(
         w / 2,
         h / 2 + 78,
-        "WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃\nEsc・P: ポーズ ／ R: リスタート",
+        "WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃\nスペース・右クリック: 地雷 ／ Esc・P: ポーズ ／ R: リスタート ／ M: 消音",
         { ...textStyle, fontSize: "15px", align: "center", lineSpacing: 8 },
       )
       .setOrigin(0.5);
@@ -86,6 +87,7 @@ export class TitleScene extends Phaser.Scene {
     });
 
     this.input.once("pointerdown", () => {
+      SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）
       this.scene.start("GameScene");
     });
   }

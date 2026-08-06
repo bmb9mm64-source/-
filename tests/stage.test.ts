@@ -43,6 +43,24 @@ describe("ステージパーサ", () => {
     expect(tileAt(stage, 20, 3)).toBe(".");
   });
 
+  it("B（ローバー）を全て抽出し床に置換する", () => {
+    const s = parseStage(
+      ["#####", "#P.B#", "#B..#", "#####"],
+      { cols: 5, rows: 4 },
+    );
+    // B はタイル (3,1) と (1,2) → 中心 (112,48)・(48,80)
+    expect(s.roverSpawns).toEqual([
+      { x: 112, y: 48 },
+      { x: 48, y: 80 },
+    ]);
+    expect(tileAt(s, 3, 1)).toBe(".");
+    expect(tileAt(s, 1, 2)).toBe(".");
+  });
+
+  it("B が無いステージでは roverSpawns は空配列になる", () => {
+    expect(stage.roverSpawns).toEqual([]);
+  });
+
   it("行数・列数が不正なら例外を投げる", () => {
     expect(() => parseStage(["###", "#P#", "###"])).toThrow(/行数が不正/);
     const bad = [...STAGE_TEST];
