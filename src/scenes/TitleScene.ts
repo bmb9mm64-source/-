@@ -50,7 +50,7 @@ export class TitleScene extends Phaser.Scene {
     const textStyle = { fontFamily: "sans-serif", color: COLORS.HUD_CSS };
 
     this.add
-      .text(w / 2, h / 2 - 56, "BLOCK TANKS（仮）", {
+      .text(w / 2, h / 2 - 56, "ハネダン！", {
         ...textStyle,
         fontSize: "44px",
         fontStyle: "bold",

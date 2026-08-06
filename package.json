@@ -1,8 +1,8 @@
 {
-  "name": "block-tanks",
+  "name": "hanedan",
   "private": true,
   "version": "0.2.0",
-  "description": "Block Tanks（仮）— 跳弾で敵戦車を撃ち抜くトップダウン戦車アクション（Phase 2 本実装）",
+  "description": "ハネダン！— 跳弾で敵戦車を撃ち抜くトップダウン戦車アクション",
   "type": "module",
   "scripts": {
     "dev": "vite",
