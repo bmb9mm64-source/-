@@ -58,13 +58,17 @@ export function createRover(x: number, y: number, rng: Rng): RoverTank {
 }
 
 /**
- * ランダムな床タイルの中心を徘徊目標として抽選する。
- * 一定回数試して床が引けなければ fallback（現在位置＝その場に留まる）を返す。
+ * ランダムな床タイルの中心を徘徊目標として抽選する（ローバー・マインレイヤーで共用）。
+ * 一定回数（tries）試して床が引けなければ fallback（現在位置＝その場に留まる）を返す。
  * 壁・穴タイルは選ばない（GDD「壁は回避」。移動中の衝突は moveTank ＋行き詰まり検知で解決）。
  */
-export function pickWanderTarget(stage: ParsedStage, rng: Rng, fallback: Vec2): Vec2 {
-  const c = BALANCE.ROVER;
-  for (let i = 0; i < c.WANDER_PICK_TRIES; i++) {
+export function pickWanderTarget(
+  stage: ParsedStage,
+  rng: Rng,
+  fallback: Vec2,
+  tries: number = BALANCE.ROVER.WANDER_PICK_TRIES,
+): Vec2 {
+  for (let i = 0; i < tries; i++) {
     const col = 1 + Math.floor(rng() * (stage.cols - 2));
     const row = 1 + Math.floor(rng() * (stage.rows - 2));
     if (tileAt(stage, col, row) === ".") {

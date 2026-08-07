@@ -1,5 +1,6 @@
 /**
- * ゲームワールド — MVP 全体（ミッション進行・戦車・弾・地雷・敵AI 2種）の
+ * ゲームワールド — ミッション進行・戦車・弾・地雷・敵AI 4種
+ * （セントリー／ローバー／スナイパー／マインレイヤー）の
  * ゲーム状態と更新ロジック（Phaser 非依存の純粋 TS）。
  * シーン（Phaser 側）は入力を渡して結果を描画・発音するだけの薄い層にする（CLAUDE.md 規約）。
  *
@@ -21,8 +22,10 @@ import { tryFire } from "./firing";
 import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
 import { type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
+import { createMinelayer, type MinelayerTank, updateMinelayer } from "./minelayer";
 import { createRover, type RoverTank, updateRover } from "./rover";
 import { createSentry, type SentryTank, updateSentry } from "./sentry";
+import { createSniper, type SniperTank, updateSniper } from "./sniper";
 import { findNearbyFloor, type ParsedStage, parseStage } from "./stage";
 import { moveTank } from "./tank";
 import type { PlayerTank } from "./types";
@@ -30,8 +33,8 @@ import type { PlayerTank } from "./types";
 /** ワールドの進行状態（ポーズはシーン側の責務なので含まない） */
 export type GameStatus = "banner" | "playing" | "gameover" | "allclear";
 
-/** 敵戦車（セントリー／ローバー） */
-export type EnemyTank = SentryTank | RoverTank;
+/** 敵戦車（セントリー／ローバー／スナイパー／マインレイヤー） */
+export type EnemyTank = SentryTank | RoverTank | SniperTank | MinelayerTank;
 
 /** ミッション定義（src/stages/missions.ts の要素と互換） */
 export interface MissionDef {
@@ -121,6 +124,8 @@ export class GameWorld {
     this.enemies = [
       ...this.stage.sentrySpawns.map((sp) => createSentry(sp.x, sp.y, this.rng)),
       ...this.stage.roverSpawns.map((sp) => createRover(sp.x, sp.y, this.rng)),
+      ...this.stage.sniperSpawns.map((sp) => createSniper(sp.x, sp.y, this.rng)),
+      ...this.stage.minelayerSpawns.map((sp) => createMinelayer(sp.x, sp.y, this.rng)),
     ];
     this.bullets = [];
     this.mines = [];
@@ -223,30 +228,57 @@ export class GameWorld {
       }
     }
 
-    // --- 敵AI（発射数は前後差分で数えて効果音イベントにする） ---
+    // --- 敵AI（発射数・敷設数は前後差分で数えて効果音イベントにする） ---
     const bulletsBeforeAI = this.bullets.length;
+    const minesBeforeAI = this.mines.length;
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      if (e.kind === "sentry") {
-        updateSentry(e, dt, {
-          players: this.players,
-          bullets: this.bullets,
-          stage: this.stage,
-          grace: this.grace,
-          rng: this.rng,
-        });
-      } else {
-        updateRover(e, dt, {
-          players: this.players,
-          bullets: this.bullets,
-          blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
-          stage: this.stage,
-          grace: this.grace,
-          rng: this.rng,
-        });
+      switch (e.kind) {
+        case "sentry":
+          updateSentry(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+          });
+          break;
+        case "sniper":
+          updateSniper(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+          });
+          break;
+        case "rover":
+          updateRover(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+          });
+          break;
+        case "minelayer":
+          // 敵の地雷も世界の地雷リストに入れ、既存の起爆・誘爆・描画に共通で乗せる
+          // （設置者除外は mine.ts が owner 単位で適用。上限3個は MINELAYER_MINE_CFG）
+          updateMinelayer(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
+            mines: this.mines,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+          });
+          break;
       }
     }
     for (let i = this.bullets.length - bulletsBeforeAI; i > 0; i--) this.events.push("fire");
+    for (let i = this.mines.length - minesBeforeAI; i > 0; i--) this.events.push("minePlaced");
 
     // --- 弾の移動と跳弾（反射回数が増えたら反射イベント） ---
     for (const b of this.bullets) {

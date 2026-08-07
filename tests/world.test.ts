@@ -135,6 +135,38 @@ describe("ミッション進行（GameWorld）", () => {
     expect(world.mines[0]!.x).toBe(world.player.x);
   });
 
+  it("C/D 入りミッション：スナイパー・マインレイヤーが生成され、全滅でクリアになる", () => {
+    // C(3,1)=(112,48)・D(4,1)=(144,48) の1ミッション構成
+    const missionCD: MissionDef = { name: "TEST-CD", grid: ["######", "#P.CD#", "######"] };
+    const world = new GameWorld([missionCD], rngHalf);
+    skipBanner(world);
+    expect(world.enemies.map((e) => e.kind).sort()).toEqual(["minelayer", "sniper"]);
+    expect(world.enemiesLeft()).toBe(2); // 敵残数に含まれる
+    killAllEnemies(world);
+    expect(world.status).toBe("allclear"); // 撃破がクリア判定に数えられる
+    expect(world.kills).toBe(2); // 撃破数に計上される
+  });
+
+  it("マインレイヤーの地雷は世界の地雷リストに入り minePlaced イベントを発生させる", () => {
+    // 中央縦壁で射線を遮った回廊。D(10,1)=(336,48) は rng=0.5 の徘徊目標 (6,2)=(208,80) へ
+    // 移動して留まり、プレイヤー (48,48) から約163px ≥ 160px なので5秒後に敷設する
+    const missionMine: MissionDef = {
+      name: "TEST-MINE",
+      grid: ["############", "#P...#....D#", "#....#.....#", "############"],
+    };
+    const world = new GameWorld([missionMine], rngHalf);
+    skipBanner(world);
+    let placedEvent = false;
+    for (let i = 0; i < 130; i++) {
+      world.update(0.05, [idleInput()]); // 6.5秒
+      if (world.events.includes("minePlaced")) placedEvent = true;
+    }
+    expect(placedEvent).toBe(true); // 効果音イベントが出た
+    expect(world.mines).toHaveLength(1); // 世界の地雷リストに入った（起爆・誘爆・描画の対象）
+    expect(world.mines[0]!.owner).toBe(world.enemies[0]); // 設置者＝マインレイヤー（設置者除外の適用先）
+    expect(world.player.alive).toBe(true); // 射線は遮られており撃たれていない
+  });
+
   it("砲塔の角度指定照準：instant=true は即応、instant=false は回転追従する", () => {
     const world = new GameWorld(MISSIONS2, rngHalf);
     skipBanner(world);

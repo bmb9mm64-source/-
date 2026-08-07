@@ -51,6 +51,13 @@ export const ENEMY_BULLET_CFG: BulletSpawnConfig = {
   MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
 };
 
+/** 敵C「スナイパー」弾の生成設定（GDD §6 v0.6：340px/s。反射上限は共通の1回） */
+export const SNIPER_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.SNIPER_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+};
+
 /** owner が場に出している生存弾の数 */
 export function liveBulletCount(bullets: readonly Bullet[], owner: object): number {
   let n = 0;
@@ -97,7 +104,7 @@ function circleHitsWall(stage: ParsedStage, x: number, y: number, rad: number): 
  * 軸ごとに移動→衝突判定→該当軸の速度反転＋押し戻し。
  * 角で同フレームに両軸が反射しても反射回数は「1回」と数える。
  * 破壊可能壁 X に触れた弾は反射せず消滅する（GDD §5。壁は壊れない）。
- * ※最大弾速225px/s（敵弾） × dt上限0.05s = 最大11.25px/フレーム < タイル32px なので突き抜けは起きない。
+ * ※最大弾速340px/s（スナイパー弾） × dt上限0.05s = 最大17px/フレーム < タイル32px なので突き抜けは起きない。
  */
 export function updateBullet(
   b: Bullet,

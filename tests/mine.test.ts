@@ -61,7 +61,7 @@ describe("地雷（起爆）", () => {
     expect(mines[0]!.dead).toBe(true);
   });
 
-  it("敵味方問わず戦車が半径40px内に接近すると起爆し、爆風で撃破する", () => {
+  it("敵対側の戦車が半径40px内に接近すると起爆し、爆風で撃破する（kind未指定は敵対扱い）", () => {
     const mines: Mine[] = [];
     tryPlaceMine(mines, { x: 48, y: 48 }); // 設置者は tanks に含めない（遠くにいる想定）
     const enemy = makeTank(120, 48); // 距離72：範囲外
@@ -90,6 +90,34 @@ describe("地雷（起爆）", () => {
     res = updateMines(mines, 0.05, [owner], [], stage());
     expect(res.explosions).toHaveLength(1);
     expect(owner.alive).toBe(false);
+  });
+
+  it("敵の地雷は同陣営の敵では起爆せず、プレイヤーの接近で起爆する（v0.6.1）", () => {
+    const mines: Mine[] = [];
+    const layer = { ...makeTank(48, 48), kind: "minelayer" };
+    tryPlaceMine(mines, layer); // 敵側の地雷
+    // 同陣営の敵（ローバー）が踏んでも起爆しない
+    const ally = { ...makeTank(60, 48), kind: "rover" }; // 距離12 < 40
+    let res = updateMines(mines, 0.05, [ally], [], stage());
+    expect(res.explosions).toHaveLength(0);
+    expect(ally.alive).toBe(true);
+    // プレイヤーが近づくと起爆する
+    const player = { ...makeTank(76, 48), kind: "player" }; // 距離28 < 40
+    res = updateMines(mines, 0.05, [ally, player], [], stage());
+    expect(res.explosions).toHaveLength(1);
+    // 爆風は敵味方の区別なく巻き込む（同陣営の敵も倒れる）
+    expect(player.alive).toBe(false);
+    expect(ally.alive).toBe(false);
+  });
+
+  it("プレイヤーの地雷は2P（同陣営）では起爆しない（v0.6.1）", () => {
+    const mines: Mine[] = [];
+    const p1 = { ...makeTank(48, 48), kind: "player" };
+    tryPlaceMine(mines, p1);
+    p1.x = 120; // 設置者は離脱
+    const p2 = { ...makeTank(60, 48), kind: "player" }; // 相方が踏んでも起爆しない
+    const res = updateMines(mines, 0.05, [p1, p2], [], stage());
+    expect(res.explosions).toHaveLength(0);
   });
 
   it("弾が触れると誘爆し、その弾も爆風で消滅する", () => {

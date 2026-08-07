@@ -10,6 +10,13 @@
  *   設置者自身は「一度トリガー半径（40px）の外へ出るまで」接近起爆の対象にしない。
  *   GDD の「接近で起爆」を文字通り適用すると、設置した瞬間に足元で起爆して必ず自爆するため。
  *   （自動起爆・誘爆・爆風による自爆は設置者にも通常どおり適用される。）
+ *
+ * v0.6.1（GDD §4）：接近起爆は**敵対側の戦車のみ**に反応する。
+ *   プレイヤーの地雷は敵の接近で、敵の地雷はプレイヤーの接近で起爆（＋一度離れた設置者の再接近）。
+ *   同陣営の戦車（敵の地雷×別の敵）では起爆しない。時限起爆・誘爆・爆風の効果範囲は
+ *   従来どおり全員に及ぶ（敵地雷をプレイヤーが撃って誘爆させ敵を巻き込む遊びは維持）。
+ *   ※修正の背景：M7 で敵ローバーが味方マインレイヤーの地雷を踏み、プレイヤーが何も
+ *     しないうちにミッションが自壊クリアする問題が実プレイ検証で発覚したため。
  */
 import { BALANCE } from "../config/balance";
 import type { Bullet } from "./bullet";
@@ -29,6 +36,7 @@ export interface Mine {
   x: number;
   y: number;
   owner: object; // 設置者（同時設置数のカウントと接近起爆の除外に使用）
+  ownerIsPlayer: boolean; // 設置者がプレイヤー側か（接近起爆の敵対判定に使用。v0.6.1）
   fuse: number; // 自動起爆までの残り時間 [s]
   ownerClear: boolean; // 設置者が一度トリガー半径外へ出たか（出るまで設置者では起爆しない）
   dead: boolean;
@@ -40,6 +48,7 @@ export interface MineTarget {
   y: number;
   radius: number; // 対弾用の円近似半径 [px]（爆風判定にも使用）
   alive: boolean;
+  kind?: string; // "player" ならプレイヤー側（接近起爆の敵対判定。未指定は敵対扱い＝旧挙動）
 }
 
 /** 爆発イベント（効果音・画面演出用の座標） */
@@ -67,7 +76,7 @@ export function liveMineCount(mines: readonly Mine[], owner: object): number {
  */
 export function tryPlaceMine(
   mines: Mine[],
-  owner: { x: number; y: number },
+  owner: { x: number; y: number; kind?: string },
   cfg: MineConfig = BALANCE.MINE,
 ): Mine | null {
   if (liveMineCount(mines, owner) >= cfg.MAX_PER_OWNER) return null;
@@ -75,6 +84,7 @@ export function tryPlaceMine(
     x: owner.x,
     y: owner.y,
     owner,
+    ownerIsPlayer: owner.kind === "player",
     fuse: cfg.FUSE_TIME,
     ownerClear: false,
     dead: false,
@@ -135,7 +145,8 @@ export function updateMines(
       continue;
     }
 
-    // 敵味方の戦車が半径 40px 内に接近で起爆（設置者は一度離れるまで対象外：冒頭の暫定解釈）
+    // 接近起爆（v0.6.1）：敵対側の戦車のみ反応（＋一度離れた設置者の再接近）。
+    // 同陣営（敵の地雷×別の敵）では起爆しない。kind 未指定の対象は敵対扱い（旧挙動互換）。
     let triggered = false;
     for (const t of tanks) {
       if (!t.alive) continue;
@@ -146,7 +157,8 @@ export function updateMines(
         if (!inRange) m.ownerClear = true;
         else if (m.ownerClear) triggered = true; // 一度離れた設置者が戻ってきた
       } else if (inRange) {
-        triggered = true;
+        const hostile = t.kind === undefined || (t.kind === "player") !== m.ownerIsPlayer;
+        if (hostile) triggered = true;
       }
     }
 

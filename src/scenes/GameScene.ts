@@ -17,7 +17,7 @@ import { eightWayAngle, type PlayerInput } from "../core/input";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
-import { MISSIONS } from "../stages/missions";
+import { ALL_MISSIONS } from "../stages/allMissions";
 
 /** 爆発フラッシュ演出（見た目のみ） */
 interface ExplosionFx {
@@ -73,7 +73,12 @@ export class GameScene extends Phaser.Scene {
     const h = BALANCE.TILE * BALANCE.ROWS;
 
     this.playerCount = data.playerCount === 2 ? 2 : 1;
-    this.world = new GameWorld(MISSIONS, Math.random, this.playerCount);
+    this.world = new GameWorld(ALL_MISSIONS, Math.random, this.playerCount);
+    // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる
+    const mParam = Number(new URLSearchParams(window.location.search).get("m"));
+    if (Number.isInteger(mParam) && mParam >= 1 && mParam <= ALL_MISSIONS.length) {
+      this.world.loadMission(mParam - 1);
+    }
     this.paused = false;
     this.fireRequested = false;
     this.mineRequested = false;
@@ -355,24 +360,35 @@ export class GameScene extends Phaser.Scene {
 
     this.dynGfx.clear();
 
-    // 地雷（本体＋点滅ランプ。起爆が近いことは点滅で伝える）
+    // 地雷（本体＋点滅ランプ。起爆が近いことは点滅で伝える。
+    // 形は共通で、プレイヤー設置＝従来色／敵（マインレイヤー）設置＝琥珀ランプの配色差で識別）
     for (const m of world.mines) {
-      this.dynGfx.fillStyle(COLORS.MINE, 1);
+      const isPlayerMine = (world.players as readonly object[]).includes(m.owner);
+      this.dynGfx.fillStyle(isPlayerMine ? COLORS.MINE : COLORS.ENEMY_MINE, 1);
       this.dynGfx.fillCircle(m.x, m.y, BALANCE.MINE.RADIUS);
       const blinkOn = Math.floor(m.fuse * BALANCE.FX.MINE_BLINK_HZ * 2) % 2 === 0;
       if (blinkOn) {
-        this.dynGfx.fillStyle(COLORS.MINE_LAMP, 1);
+        this.dynGfx.fillStyle(isPlayerMine ? COLORS.MINE_LAMP : COLORS.ENEMY_MINE_LAMP, 1);
         this.dynGfx.fillCircle(m.x, m.y, BALANCE.MINE.RADIUS / 2);
       }
     }
 
-    // 戦車（セントリー＝橙／ローバー＝赤／1P＝青／2P＝緑。退場者は描かない）
+    // 戦車（セントリー＝橙／ローバー＝赤／スナイパー＝紫／マインレイヤー＝黄／1P＝青／2P＝緑。退場者は描かない）
     for (const e of world.enemies) {
       if (!e.alive) continue;
-      if (e.kind === "sentry") {
-        this.drawTank(e, COLORS.ENEMY_BODY, COLORS.ENEMY_TRACK, COLORS.ENEMY_TURRET);
-      } else {
-        this.drawTank(e, COLORS.ROVER_BODY, COLORS.ROVER_TRACK, COLORS.ROVER_TURRET);
+      switch (e.kind) {
+        case "sentry":
+          this.drawTank(e, COLORS.ENEMY_BODY, COLORS.ENEMY_TRACK, COLORS.ENEMY_TURRET);
+          break;
+        case "rover":
+          this.drawTank(e, COLORS.ROVER_BODY, COLORS.ROVER_TRACK, COLORS.ROVER_TURRET);
+          break;
+        case "sniper":
+          this.drawTank(e, COLORS.SNIPER_BODY, COLORS.SNIPER_TRACK, COLORS.SNIPER_TURRET);
+          break;
+        case "minelayer":
+          this.drawTank(e, COLORS.MINELAYER_BODY, COLORS.MINELAYER_TRACK, COLORS.MINELAYER_TURRET);
+          break;
       }
     }
     for (const p of world.players) {

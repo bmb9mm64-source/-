@@ -30,7 +30,8 @@ export const BALANCE = {
 
   BULLET: {
     SPEED: 200, // プレイヤー弾の弾速 [px/s]（GDD §4。v0.4 で敵弾と分離）
-    ENEMY_BULLET_SPEED: 225, // 敵弾（セントリー・ローバー）の弾速 [px/s]（GDD §6 v0.4：敵弾のみ強化）
+    ENEMY_BULLET_SPEED: 225, // 敵弾（セントリー・ローバー・マインレイヤー）の弾速 [px/s]（GDD §6 v0.4：敵弾のみ強化）
+    SNIPER_BULLET_SPEED: 340, // 敵C「スナイパー」弾の弾速 [px/s]（GDD §6 v0.6。反射上限は共通の1回）
     RADIUS: 4, // 弾の当たり判定半径 [px]
     MAX_BOUNCES: 1, // 反射上限（2回目の壁接触で消滅）
     MUZZLE_OFFSET: 22, // 砲口オフセット [px]（車体半径14+弾半径4 より外側 → 発射直後の自爆なし）
@@ -71,6 +72,40 @@ export const BALANCE = {
     DODGE_CHANCE: 0.5, // 回避を試みる確率（GDD §6 v0.4：35%→50% に強化）
     DODGE_TIME: 0.3, // 回避移動の継続時間 [s]（「短い回避移動」）
     DODGE_COOLDOWN: 0.8, // 回避判定のクールダウン [s]（毎フレーム抽選しない）
+  },
+
+  SNIPER: {
+    // 敵C「スナイパー」（狙撃型。GDD §6 v0.6）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (70 * Math.PI) / 180, // 砲塔回転速度 70°/s（ゆっくりだがブレなし＝精密照準）
+    FIRE_INTERVAL_MEAN: 4.0, // 発射間隔の平均 [s]
+    FIRE_INTERVAL_VAR: 1.0, // 発射間隔のゆらぎ幅（±）[s]
+    MAX_BULLETS: 1, // 同時発射数上限
+    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
+    RICOCHET_AIM_CHANCE: 0.35, // 跳弾狙撃を試みる確率（セントリーの20%より高い。GDD §6 v0.6）
+  },
+
+  MINELAYER: {
+    // 敵D「マインレイヤー」（地雷敷設型。GDD §6 v0.6。移動・射撃はローバーと同方式・回避なし）
+    SIZE: 28,
+    RADIUS: 14,
+    SPEED: 70, // 移動速度 [px/s]
+    TURN_SPEED: (120 * Math.PI) / 180, // 砲塔回転速度 120°/s
+    BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用）
+    FIRE_INTERVAL_MEAN: 2.5, // 発射間隔の平均 [s]
+    FIRE_INTERVAL_VAR: 1.0, // 発射間隔のゆらぎ幅（±）[s]
+    MAX_BULLETS: 1, // 同時発射数上限
+    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
+    RETARGET_INTERVAL_MIN: 1.5, // 徘徊目標を引き直す間隔（最小）[s]（ローバーと同じ調整値）
+    RETARGET_INTERVAL_MAX: 3.5, // 徘徊目標を引き直す間隔（最大）[s]
+    ARRIVE_DIST: 8, // 目標到達とみなす距離 [px]
+    STUCK_TIME: 0.25, // 壁・戦車に行き詰まったと判断するまでの時間 [s]
+    WANDER_PICK_TRIES: 20, // 徘徊目標（床タイル）の抽選試行回数
+    MINE_MAX: 3, // 地雷の同時敷設上限（自分が敷設した生存地雷のみ数える。GDD §6 v0.6）
+    MINE_INTERVAL_MEAN: 5.0, // 敷設間隔の平均 [s]
+    MINE_INTERVAL_VAR: 2.0, // 敷設間隔のゆらぎ幅（±）[s]
+    MINE_SAFE_DIST: 160, // 敷設を許可する最寄り生存プレイヤーとの最小距離 [px]（自爆行為の防止）
   },
 
   MINE: {
@@ -134,10 +169,18 @@ export const COLORS = {
   ROVER_BODY: 0xb84545, // 敵B「ローバー」は赤系で区別（セントリーは橙）
   ROVER_TRACK: 0x772b2b,
   ROVER_TURRET: 0xff9d9d,
+  SNIPER_BODY: 0x8a55d4, // 敵C「スナイパー」は紫系のオリジナル配色（GDD §6 v0.6）
+  SNIPER_TRACK: 0x59318f,
+  SNIPER_TURRET: 0xd7b8ff,
+  MINELAYER_BODY: 0xcfae2e, // 敵D「マインレイヤー」は黄系のオリジナル配色（GDD §6 v0.6）
+  MINELAYER_TRACK: 0x8a7217,
+  MINELAYER_TURRET: 0xffe98f,
   WALL_X: 0x8a6d4c, // 破壊可能壁 X（土嚢風の茶系。恒久壁と区別）
   WALL_X_EDGE: 0xa88860,
-  MINE: 0x3a3f4d, // 地雷本体
-  MINE_LAMP: 0xff5d5d, // 地雷の点滅ランプ
+  MINE: 0x3a3f4d, // 地雷本体（プレイヤー設置）
+  MINE_LAMP: 0xff5d5d, // 地雷の点滅ランプ（プレイヤー設置）
+  ENEMY_MINE: 0x4d4433, // 敵（マインレイヤー）設置の地雷本体（形は同じ・配色差で識別）
+  ENEMY_MINE_LAMP: 0xffb13d, // 敵地雷の点滅ランプ（琥珀色）
   EXPLOSION: 0xffb347, // 爆風フラッシュ
   BULLET: 0xf2f0e6,
   BULLET_EDGE: 0x8f8c7c,

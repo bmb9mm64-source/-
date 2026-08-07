@@ -1,39 +1,48 @@
 /**
- * MVP ミッション M1〜M5 の機械的検証（level-designer からの申し送り）。
+ * 本編ミッション M1〜M10 の機械的検証（level-designer からの申し送り）。
  * 各ミッションについて：
  *   1. グリッドが正規サイズ（25×17）で外周が全て恒久壁 # であること
  *   2. P・全敵の初期位置が床であること（パース成功＝スポーンタイルが '.' になる）
  *   3. 開幕時に P から全敵への射線（hasLineOfSight）が通らないこと（開幕即撃ち抜き防止）
- * 加えて GDD §7 の敵構成（M1:A1 / M2:A2 / M3:B1 / M4:A1+B1 / M5:A2+B2）を確認する。
+ * 加えて GDD §7 の敵構成（MVP表＋拡張 M6〜M10 表）を確認する。
  */
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
 import { hasLineOfSight } from "../src/core/los";
 import { parseStage, tileAt } from "../src/core/stage";
-import { MISSIONS } from "../src/stages/missions";
+import { ALL_MISSIONS } from "../src/stages/allMissions";
 
-describe("MVP ミッション構成", () => {
-  it("ミッションは5面ある（GDD §1：MVP規模）", () => {
-    expect(MISSIONS).toHaveLength(5);
+describe("本編ミッション構成", () => {
+  it("ミッションは10面ある（MVP 5面＋Phase 4 第2弾 5面）", () => {
+    expect(ALL_MISSIONS).toHaveLength(10);
   });
 
   it("敵構成が GDD §7 の表と一致する", () => {
     const expected = [
-      { sentries: 1, rovers: 0 }, // M1
-      { sentries: 2, rovers: 0 }, // M2
-      { sentries: 0, rovers: 1 }, // M3
-      { sentries: 1, rovers: 1 }, // M4
-      { sentries: 2, rovers: 2 }, // M5
+      { sentries: 1, rovers: 0, snipers: 0, minelayers: 0 }, // M1
+      { sentries: 2, rovers: 0, snipers: 0, minelayers: 0 }, // M2
+      { sentries: 0, rovers: 1, snipers: 0, minelayers: 0 }, // M3
+      { sentries: 1, rovers: 1, snipers: 0, minelayers: 0 }, // M4
+      { sentries: 2, rovers: 2, snipers: 0, minelayers: 0 }, // M5
+      { sentries: 1, rovers: 0, snipers: 1, minelayers: 0 }, // M6
+      { sentries: 0, rovers: 1, snipers: 0, minelayers: 1 }, // M7
+      { sentries: 0, rovers: 2, snipers: 1, minelayers: 0 }, // M8
+      { sentries: 2, rovers: 1, snipers: 0, minelayers: 1 }, // M9
+      { sentries: 0, rovers: 2, snipers: 2, minelayers: 1 }, // M10
     ];
-    MISSIONS.forEach((m, i) => {
+    ALL_MISSIONS.forEach((m, i) => {
       const stage = parseStage(m.grid);
       expect(stage.sentrySpawns, `${m.name} のセントリー数`).toHaveLength(expected[i]!.sentries);
       expect(stage.roverSpawns, `${m.name} のローバー数`).toHaveLength(expected[i]!.rovers);
+      expect(stage.sniperSpawns, `${m.name} のスナイパー数`).toHaveLength(expected[i]!.snipers);
+      expect(stage.minelayerSpawns, `${m.name} のマインレイヤー数`).toHaveLength(
+        expected[i]!.minelayers,
+      );
     });
   });
 });
 
-for (const mission of MISSIONS) {
+for (const mission of ALL_MISSIONS) {
   describe(`ミッション検証: ${mission.name}`, () => {
     it("グリッドは 25×17 の正規サイズである", () => {
       expect(mission.grid).toHaveLength(BALANCE.ROWS);
@@ -56,7 +65,13 @@ for (const mission of MISSIONS) {
 
     it("P・全敵の初期位置は床である", () => {
       const stage = parseStage(mission.grid); // パース成功自体が P 存在の検証を兼ねる
-      const spawns = [stage.playerSpawn, ...stage.sentrySpawns, ...stage.roverSpawns];
+      const spawns = [
+        stage.playerSpawn,
+        ...stage.sentrySpawns,
+        ...stage.roverSpawns,
+        ...stage.sniperSpawns,
+        ...stage.minelayerSpawns,
+      ];
       for (const sp of spawns) {
         const col = Math.floor(sp.x / stage.tile);
         const row = Math.floor(sp.y / stage.tile);
@@ -67,7 +82,12 @@ for (const mission of MISSIONS) {
     it("開幕時に P から全敵への射線が通らない（開幕即撃ち抜き防止）", () => {
       const stage = parseStage(mission.grid);
       const p = stage.playerSpawn;
-      const enemies = [...stage.sentrySpawns, ...stage.roverSpawns];
+      const enemies = [
+        ...stage.sentrySpawns,
+        ...stage.roverSpawns,
+        ...stage.sniperSpawns,
+        ...stage.minelayerSpawns,
+      ];
       expect(enemies.length).toBeGreaterThan(0);
       for (const e of enemies) {
         expect(

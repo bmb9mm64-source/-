@@ -5,20 +5,23 @@
  *   X 破壊可能壁（通行不可・弾は消滅＝反射しない）
  *   H 穴（戦車不可・弾は上を通過）
  *   P プレイヤー初期位置（床扱い）   A 敵A「セントリー」（床扱い）
- *   B 敵B「ローバー」（床扱い）
+ *   B 敵B「ローバー」（床扱い）      C 敵C「スナイパー」（床扱い）
+ *   D 敵D「マインレイヤー」（床扱い）
  */
 import { BALANCE } from "../config/balance";
 import type { Vec2 } from "./types";
 
 /** 解析済みステージ */
 export interface ParsedStage {
-  grid: string[][]; // grid[row][col] のタイル文字（P/A/B は '.' に置換済み）
+  grid: string[][]; // grid[row][col] のタイル文字（P/A/B/C/D は '.' に置換済み）
   cols: number;
   rows: number;
   tile: number; // 1タイルの辺長 [px]
   playerSpawn: Vec2; // プレイヤー初期位置（タイル中心の px 座標）
   sentrySpawns: Vec2[]; // 敵A「セントリー」の初期位置
   roverSpawns: Vec2[]; // 敵B「ローバー」の初期位置
+  sniperSpawns: Vec2[]; // 敵C「スナイパー」の初期位置（GDD §7 v0.6）
+  minelayerSpawns: Vec2[]; // 敵D「マインレイヤー」の初期位置（GDD §7 v0.6）
 }
 
 /** パーサのオプション（省略時は GDD §7 の正規サイズ。テストでは小さい盤面を渡せる） */
@@ -41,6 +44,8 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
   let playerSpawn: Vec2 | null = null;
   const sentrySpawns: Vec2[] = [];
   const roverSpawns: Vec2[] = [];
+  const sniperSpawns: Vec2[] = [];
+  const minelayerSpawns: Vec2[] = [];
 
   for (let r = 0; r < lines.length; r++) {
     const rowStr = lines[r]!;
@@ -61,13 +66,29 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
       } else if (ch === "B") {
         roverSpawns.push({ x: cx, y: cy });
         ch = ".";
+      } else if (ch === "C") {
+        sniperSpawns.push({ x: cx, y: cy });
+        ch = ".";
+      } else if (ch === "D") {
+        minelayerSpawns.push({ x: cx, y: cy });
+        ch = ".";
       }
       line.push(ch);
     }
     grid.push(line);
   }
   if (!playerSpawn) throw new Error("ステージに P（プレイヤー初期位置）がありません");
-  return { grid, cols, rows, tile, playerSpawn, sentrySpawns, roverSpawns };
+  return {
+    grid,
+    cols,
+    rows,
+    tile,
+    playerSpawn,
+    sentrySpawns,
+    roverSpawns,
+    sniperSpawns,
+    minelayerSpawns,
+  };
 }
 
 /**
