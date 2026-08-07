@@ -15,7 +15,7 @@ export const BALANCE = {
     SPEED: 120, // 移動速度 [px/s]（GDD §4）
     SIZE: 28, // 車体当たり判定（正方形の辺長）[px]
     RADIUS: 14, // 対弾用の円近似半径 [px]（28×28 の円近似）
-    FIRE_INTERVAL: 0.3, // 発射間隔 [s]
+    FIRE_INTERVAL: 0.15, // 発射間隔 [s]（GDD §4 v0.9.1：0.3→0.15。連射速度2倍）
     MAX_BULLETS: 5, // 同時発射数上限（プレイヤーごとに独立。GDD §12.5）
     BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用。GDD「滑らかに回転」）
     TURRET_TURN_SPEED_KEYS: (540 * Math.PI) / 180, // 2P キーボード照準（IJKL）時の砲塔回転追従速度 [rad/s]（GDD §12.5「押した方向へ回転追従」。速度は本ファイルの調整値）
