@@ -9,26 +9,32 @@
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
 import { hasLineOfSight } from "../src/core/los";
-import { parseStage, tileAt } from "../src/core/stage";
+import { findOuterWallRicochet } from "../src/core/ricochetAim";
+import { findNearbyFloor, parseStage, tileAt } from "../src/core/stage";
 import { ALL_MISSIONS } from "../src/stages/allMissions";
 
 describe("本編ミッション構成", () => {
-  it("ミッションは10面ある（MVP 5面＋Phase 4 第2弾 5面）", () => {
-    expect(ALL_MISSIONS).toHaveLength(10);
+  it("ミッションは15面ある（MVP 5面＋第2弾 5面＋Phase 5 5面）", () => {
+    expect(ALL_MISSIONS).toHaveLength(15);
   });
 
   it("敵構成が GDD §7 の表と一致する", () => {
     const expected = [
-      { sentries: 1, rovers: 0, snipers: 0, minelayers: 0 }, // M1
-      { sentries: 2, rovers: 0, snipers: 0, minelayers: 0 }, // M2
-      { sentries: 0, rovers: 1, snipers: 0, minelayers: 0 }, // M3
-      { sentries: 1, rovers: 1, snipers: 0, minelayers: 0 }, // M4
-      { sentries: 2, rovers: 2, snipers: 0, minelayers: 0 }, // M5
-      { sentries: 1, rovers: 0, snipers: 1, minelayers: 0 }, // M6
-      { sentries: 0, rovers: 1, snipers: 0, minelayers: 1 }, // M7
-      { sentries: 0, rovers: 2, snipers: 1, minelayers: 0 }, // M8
-      { sentries: 2, rovers: 1, snipers: 0, minelayers: 1 }, // M9
-      { sentries: 0, rovers: 2, snipers: 2, minelayers: 1 }, // M10
+      { sentries: 1, rovers: 0, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M1
+      { sentries: 2, rovers: 0, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M2
+      { sentries: 0, rovers: 1, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M3
+      { sentries: 1, rovers: 1, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M4
+      { sentries: 2, rovers: 2, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M5
+      { sentries: 1, rovers: 0, snipers: 1, minelayers: 0, reflectors: 0, chasers: 0 }, // M6
+      { sentries: 0, rovers: 1, snipers: 0, minelayers: 1, reflectors: 0, chasers: 0 }, // M7
+      { sentries: 0, rovers: 2, snipers: 1, minelayers: 0, reflectors: 0, chasers: 0 }, // M8
+      { sentries: 2, rovers: 1, snipers: 0, minelayers: 1, reflectors: 0, chasers: 0 }, // M9
+      { sentries: 0, rovers: 2, snipers: 2, minelayers: 1, reflectors: 0, chasers: 0 }, // M10
+      { sentries: 1, rovers: 0, snipers: 0, minelayers: 0, reflectors: 1, chasers: 0 }, // M11
+      { sentries: 0, rovers: 1, snipers: 0, minelayers: 0, reflectors: 0, chasers: 1 }, // M12
+      { sentries: 0, rovers: 1, snipers: 1, minelayers: 0, reflectors: 1, chasers: 0 }, // M13
+      { sentries: 2, rovers: 0, snipers: 0, minelayers: 1, reflectors: 0, chasers: 1 }, // M14
+      { sentries: 0, rovers: 1, snipers: 1, minelayers: 1, reflectors: 1, chasers: 1 }, // M15
     ];
     ALL_MISSIONS.forEach((m, i) => {
       const stage = parseStage(m.grid);
@@ -38,7 +44,28 @@ describe("本編ミッション構成", () => {
       expect(stage.minelayerSpawns, `${m.name} のマインレイヤー数`).toHaveLength(
         expected[i]!.minelayers,
       );
+      expect(stage.reflectorSpawns, `${m.name} のリフレクター数`).toHaveLength(
+        expected[i]!.reflectors,
+      );
+      expect(stage.chaserSpawns, `${m.name} のチェイサー数`).toHaveLength(expected[i]!.chasers);
     });
+  });
+
+  it("E（リフレクター）は開幕時、P と 2P 位置への外周壁1回反射の射線も持たない（GDD §7 v0.9）", () => {
+    // E は跳弾狙撃を常時100%使うため、開幕グレース明けの即狙撃を防ぐ設計基準
+    for (const m of ALL_MISSIONS) {
+      const stage = parseStage(m.grid);
+      const p1 = stage.playerSpawn;
+      const p2 = findNearbyFloor(stage, p1);
+      for (const e of stage.reflectorSpawns) {
+        for (const p of [p1, p2]) {
+          expect(
+            findOuterWallRicochet(stage, e.x, e.y, p.x, p.y),
+            `${m.name}: E(${e.x},${e.y})→(${p.x},${p.y}) の反射射線`,
+          ).toBeNull();
+        }
+      }
+    }
   });
 });
 
@@ -71,6 +98,8 @@ for (const mission of ALL_MISSIONS) {
         ...stage.roverSpawns,
         ...stage.sniperSpawns,
         ...stage.minelayerSpawns,
+        ...stage.reflectorSpawns,
+        ...stage.chaserSpawns,
       ];
       for (const sp of spawns) {
         const col = Math.floor(sp.x / stage.tile);
@@ -87,6 +116,8 @@ for (const mission of ALL_MISSIONS) {
         ...stage.roverSpawns,
         ...stage.sniperSpawns,
         ...stage.minelayerSpawns,
+        ...stage.reflectorSpawns,
+        ...stage.chaserSpawns,
       ];
       expect(enemies.length).toBeGreaterThan(0);
       for (const e of enemies) {
