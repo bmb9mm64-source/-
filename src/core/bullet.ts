@@ -16,6 +16,9 @@ export interface Bullet {
   owner: object; // 同時発射数のカウント用
   ownerIsPlayer: boolean; // 発射者がプレイヤー側か（v0.12：敵弾は敵に当たらない。GDD §5.2）
   armed: boolean; // 発射者から一度離れたか（GDD §5.3 v0.12：離れるまで発射者には当たらない）
+  fuse?: number; // 榴弾の炸裂までの残り時間 [s]（敵M「ボマー」の弾のみ。GDD §6 v0.14）
+  blastRadius?: number; // 炸裂時の爆風半径 [px]（fuse を持つ弾のみ）
+  detonated?: boolean; // このフレームで炸裂したか（world が爆風処理に使う）
   dead: boolean;
 }
 
@@ -37,6 +40,8 @@ export interface BulletSpawnConfig {
   RADIUS: number;
   MUZZLE_OFFSET: number;
   MAX_BOUNCES?: number; // 弾固有の反射上限（省略時は共通の BALANCE.BULLET.MAX_BOUNCES）
+  FUSE?: number; // 榴弾：炸裂までの時間 [s]（設定すると反射せず、時間切れ／壁接触で炸裂する）
+  BLAST_RADIUS?: number; // 榴弾：炸裂時の爆風半径 [px]
 }
 
 /**
@@ -88,6 +93,10 @@ export function spawnBullet(
     dead: false,
   };
   if (cfg.MAX_BOUNCES !== undefined) b.maxBounces = cfg.MAX_BOUNCES; // 弾固有の反射上限（敵E弾）
+  if (cfg.FUSE !== undefined) {
+    b.fuse = cfg.FUSE; // 榴弾（敵M弾）：時間切れ／壁接触で炸裂する
+    b.blastRadius = cfg.BLAST_RADIUS ?? BALANCE.BULLET.SHELL_BLAST_RADIUS;
+  }
   bullets.push(b);
   return b;
 }
@@ -120,6 +129,22 @@ export const PRISM_BULLET_CFG: BulletSpawnConfig = {
   RADIUS: BALANCE.BULLET.RADIUS,
   MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
   MAX_BOUNCES: BALANCE.BULLET.PRISM_MAX_BOUNCES,
+};
+
+/** 敵V「バースター」弾の生成設定（GDD §6 v0.14：200px/s・反射1回） */
+export const VOLLEY_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.VOLLEY_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+};
+
+/** 敵M「ボマー」の榴弾（GDD §6 v0.14：190px/s・反射せず 1.1 秒で炸裂） */
+export const SHELL_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.SHELL_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+  FUSE: BALANCE.BULLET.SHELL_FUSE,
+  BLAST_RADIUS: BALANCE.BULLET.SHELL_BLAST_RADIUS,
 };
 
 /**
@@ -185,6 +210,10 @@ export function updateBullet(
   stage: ParsedStage,
   maxBounces: number = BALANCE.BULLET.MAX_BOUNCES,
 ): void {
+  if (b.fuse !== undefined) {
+    updateShell(b, dt, stage); // 榴弾（敵M弾）は反射せず、時間切れ／壁接触で炸裂する
+    return;
+  }
   const eps = BALANCE.EPS;
   const bounceLimit = b.maxBounces ?? maxBounces; // 弾固有の上限が最優先（敵E「リフレクター」の2回反射弾）
   let bounced = false;
@@ -223,6 +252,28 @@ export function updateBullet(
   if (bounced) {
     b.bounces++;
     if (b.bounces > bounceLimit) b.dead = true; // 反射上限超過（上限+1回目の壁接触）で消滅
+  }
+}
+
+/**
+ * 榴弾の更新（GDD §6 v0.14）。反射せず直進し、
+ *   - 信管の時間切れ、または
+ *   - 壁（`#`・`X`）への接触
+ * で炸裂する。炸裂したフレームだけ detonated=true になり、爆風処理は world が行う。
+ */
+function updateShell(b: Bullet, dt: number, stage: ParsedStage): void {
+  b.fuse = (b.fuse ?? 0) - dt;
+  b.x += b.vx * dt;
+  b.y += b.vy * dt;
+  const hitWall = circleHitsWall(stage, b.x, b.y, b.radius) !== null;
+  if (b.fuse <= 0 || hitWall) {
+    if (hitWall) {
+      // 壁の内部で炸裂しないよう、1フレーム分だけ手前に戻す（爆風の中心を盤面内に保つ）
+      b.x -= b.vx * dt;
+      b.y -= b.vy * dt;
+    }
+    b.detonated = true;
+    b.dead = true;
   }
 }
 

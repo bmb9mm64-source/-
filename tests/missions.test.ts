@@ -112,6 +112,9 @@ for (const mission of ALL_MISSIONS) {
         ...stage.reflectorSpawns,
         ...stage.chaserSpawns,
         ...stage.prismSpawns,
+        ...stage.shielderSpawns,
+        ...stage.volleySpawns,
+        ...stage.mortarSpawns,
       ];
       for (const sp of spawns) {
         const col = Math.floor(sp.x / stage.tile);
@@ -131,6 +134,9 @@ for (const mission of ALL_MISSIONS) {
         ...stage.reflectorSpawns,
         ...stage.chaserSpawns,
         ...stage.prismSpawns,
+        ...stage.shielderSpawns,
+        ...stage.volleySpawns,
+        ...stage.mortarSpawns,
       ];
       expect(enemies.length).toBeGreaterThan(0);
       for (const e of enemies) {

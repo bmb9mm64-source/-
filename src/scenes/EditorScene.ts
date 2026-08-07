@@ -41,6 +41,9 @@ const TILE_LABELS: Record<EditorTile, string> = {
   E: "敵E",
   F: "敵F",
   G: "敵G",
+  S: "敵S",
+  V: "敵V",
+  M: "敵M",
 };
 
 /** タイルの塗り色（盤面・パレット共通。戦車系は本体色で示す） */
@@ -57,6 +60,9 @@ const TILE_COLORS: Record<EditorTile, number> = {
   E: COLORS.REFLECTOR_BODY,
   F: COLORS.CHASER_BODY,
   G: COLORS.PRISM_BODY,
+  S: COLORS.SHIELDER_BODY,
+  V: COLORS.VOLLEY_BODY,
+  M: COLORS.MORTAR_BODY,
 };
 
 export class EditorScene extends Phaser.Scene {
@@ -109,19 +115,19 @@ export class EditorScene extends Phaser.Scene {
     topBar.fillRect(0, 0, w, BALANCE.TILE);
     this.paletteMarks = [];
     EDITOR_TILES.forEach((tile, i) => {
-      const x = 10 + i * 62;
+      const x = 6 + i * 53;
       const mark = this.add
-        .rectangle(x + 26, 16, 56, 26, 0x000000, 0)
+        .rectangle(x + 24, 16, 50, 26, 0x000000, 0)
         .setStrokeStyle(2, 0xffffff, 0)
         .setDepth(7);
       this.paletteMarks.push(mark);
-      this.add.rectangle(x + 10, 16, 18, 18, TILE_COLORS[tile]).setDepth(6);
+      this.add.rectangle(x + 9, 16, 16, 16, TILE_COLORS[tile]).setDepth(6);
       this.add
-        .text(x + 22, 16, TILE_LABELS[tile], barStyle)
+        .text(x + 20, 16, TILE_LABELS[tile], { ...barStyle, fontSize: "12px" })
         .setOrigin(0, 0.5)
         .setDepth(6);
       this.add
-        .rectangle(x + 26, 16, 60, 30, 0x000000, 0.001) // クリック領域
+        .rectangle(x + 24, 16, 52, 30, 0x000000, 0.001) // クリック領域
         .setDepth(8)
         .setInteractive({ useHandCursor: true })
         .on("pointerdown", () => {

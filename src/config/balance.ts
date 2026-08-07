@@ -47,6 +47,10 @@ export const BALANCE = {
     SNIPER_BULLET_SPEED: 340, // 敵C「スナイパー」弾の弾速 [px/s]（GDD §6 v0.6。反射上限は共通の1回）
     REFLECTOR_BULLET_SPEED: 300, // 敵E「リフレクター」弾の弾速 [px/s]（GDD §6 v0.9）
     REFLECTOR_MAX_BOUNCES: 2, // 敵E弾の反射上限（この敵の弾だけ2回跳ねる。GDD §6 v0.9）
+    SHELL_SPEED: 190, // 敵M「ボマー」の榴弾速度 [px/s]（GDD §6 v0.14）
+    SHELL_FUSE: 1.1, // 榴弾が炸裂するまでの時間 [s]（壁に当たればその時点で炸裂）
+    SHELL_BLAST_RADIUS: 44, // 榴弾の爆風半径 [px]
+    VOLLEY_BULLET_SPEED: 200, // 敵V「バースター」弾の弾速 [px/s]（やや遅く＝相殺の余地）
     PRISM_BULLET_SPEED: 280, // 敵G「プリズム」弾の弾速 [px/s]（GDD §6 v0.10）
     PRISM_MAX_BOUNCES: 3, // 敵G弾の反射上限（3回跳ねて盤面を長く飛び回る。GDD §6 v0.10）
     RADIUS: 4, // 弾の当たり判定半径 [px]
@@ -131,6 +135,56 @@ export const BALANCE = {
     MAX_BULLETS: 1, // 同時発射数上限（3回反射弾が長く残るため1発）
     FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]
     // 跳弾狙撃は難易度によらず常時100%（リフレクターと同様。GDD §6 v0.10）
+  },
+
+  SHIELDER: {
+    // 敵S「シールダー」（盾持ち型。GDD §6 v0.14。移動はローバーと同方式・低速）
+    SIZE: 28,
+    RADIUS: 14,
+    SPEED: 55, // 移動速度 [px/s]
+    TURN_SPEED: (110 * Math.PI) / 180, // 砲塔回転速度 110°/s
+    BODY_TURN_SPEED: 12,
+    SHIELD_TURN_SPEED: (60 * Math.PI) / 180, // 盾がプレイヤー方向へ追従する速度 60°/s
+    SHIELD_ARC: (60 * Math.PI) / 180, // 盾が守る角度（正面から±60°＝計120°）
+    FIRE_INTERVAL_MEAN: 2.8,
+    FIRE_INTERVAL_VAR: 0.8,
+    MAX_BULLETS: 1,
+    FIRE_ANGLE_TOL: 0.15,
+    RETARGET_INTERVAL_MIN: 1.5,
+    RETARGET_INTERVAL_MAX: 3.5,
+    ARRIVE_DIST: 8,
+    STUCK_TIME: 0.25,
+    WANDER_PICK_TRIES: 20,
+  },
+
+  VOLLEY: {
+    // 敵V「バースター」（連射型。GDD §6 v0.14。3連射を1セットとして撃つ）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (130 * Math.PI) / 180, // 砲塔回転速度 130°/s
+    JITTER_MAX: (2 * Math.PI) / 180, // 照準の最大ブレ（±2°）
+    JITTER_INTERVAL_MIN: 0.4,
+    JITTER_INTERVAL_MAX: 1.2,
+    BURST_COUNT: 3, // 1セットの発射数
+    BURST_GAP: 0.18, // 連射の間隔 [s]
+    FIRE_INTERVAL_MEAN: 3.2, // セット間隔の平均 [s]（難易度倍率の対象）
+    FIRE_INTERVAL_VAR: 1.0,
+    MAX_BULLETS: 3, // 同時発射数上限（3連射ぶん）
+    FIRE_ANGLE_TOL: 0.15,
+  },
+
+  MORTAR: {
+    // 敵M「ボマー」（榴弾型。GDD §6 v0.14。弾は反射せず一定時間で炸裂する）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (100 * Math.PI) / 180, // 砲塔回転速度 100°/s
+    JITTER_MAX: (2 * Math.PI) / 180,
+    JITTER_INTERVAL_MIN: 0.4,
+    JITTER_INTERVAL_MAX: 1.2,
+    FIRE_INTERVAL_MEAN: 3.5,
+    FIRE_INTERVAL_VAR: 1.0,
+    MAX_BULLETS: 1,
+    FIRE_ANGLE_TOL: 0.15,
   },
 
   CHASER: {
@@ -311,6 +365,17 @@ export const COLORS = {
   CHASER_BODY: 0xaab4bf, // 敵F「チェイサー」は白銀系のオリジナル配色（GDD §6 v0.9）
   CHASER_TRACK: 0x6e7883,
   CHASER_TURRET: 0xf2f6fa,
+  SHIELDER_BODY: 0x4d7ea8, // 敵S「シールダー」は鋼青（スチールブルー）系（GDD §6 v0.14）
+  SHIELDER_TRACK: 0x2f5470,
+  SHIELDER_TURRET: 0xbcd8ef,
+  SHIELDER_SHIELD: 0xe2eefa, // 盾（正面の弧）
+  VOLLEY_BODY: 0xe0562f, // 敵V「バースター」は橙赤（バーミリオン）系
+  VOLLEY_TRACK: 0x93341a,
+  VOLLEY_TURRET: 0xffb08f,
+  MORTAR_BODY: 0x5f7a3a, // 敵M「ボマー」は深緑（オリーブ）系
+  MORTAR_TRACK: 0x3c4f24,
+  MORTAR_TURRET: 0xc3e08a,
+  SHELL: 0xffd08a, // 榴弾（通常弾と区別できる暖色）
   PRISM_BODY: 0xd44fb0, // 敵G「プリズム」はマゼンタ（赤紫）系のオリジナル配色（GDD §6 v0.10）
   PRISM_TRACK: 0x8f2f77,
   PRISM_TURRET: 0xffb3e6,

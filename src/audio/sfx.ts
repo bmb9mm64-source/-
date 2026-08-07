@@ -164,6 +164,10 @@ class SfxEngine {
       case "cancel":
         this.cancel();
         break;
+      case "shieldBlock":
+        // 盾で弾かれた音（相殺音を低めに鳴らして「無効化された」ことを伝える）
+        this.cancel();
+        break;
       case "tankDestroyed":
       case "playerHit":
         this.destroy();

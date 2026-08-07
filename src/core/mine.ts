@@ -93,8 +93,8 @@ export function tryPlaceMine(
   return m;
 }
 
-/** 爆心 (x,y) の爆風円と重なる破壊可能壁 X を床に変える。消した枚数を返す */
-function destroyXTiles(stage: ParsedStage, x: number, y: number, radius: number): number {
+/** 爆心 (x,y) の爆風円と重なる破壊可能壁 X を床に変える。消した枚数を返す（榴弾からも使う） */
+export function destroyXTiles(stage: ParsedStage, x: number, y: number, radius: number): number {
   const t = stage.tile;
   const c0 = Math.floor((x - radius) / t);
   const c1 = Math.floor((x + radius) / t);

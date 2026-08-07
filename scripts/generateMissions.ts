@@ -141,6 +141,9 @@ function validate(g: Grid, kinds: string[]): boolean {
     ...stage.reflectorSpawns,
     ...stage.chaserSpawns,
     ...stage.prismSpawns,
+    ...stage.shielderSpawns,
+    ...stage.volleySpawns,
+    ...stage.mortarSpawns,
   ];
   if (enemies.length !== kinds.length) return false;
 
@@ -176,8 +179,20 @@ function validate(g: Grid, kinds: string[]): boolean {
     if (safe < reachPts.length * 0.1) return false; // 逃げ場が1割未満なら没
   }
 
-  // 移動する敵（B・D・F）は動ける床の広がりが必要
-  const movers = [...stage.roverSpawns, ...stage.minelayerSpawns, ...stage.chaserSpawns];
+  // 敵S「シールダー」は正面からの直射では絶対に倒せないため、
+  // **跳弾で当てられる位置が必ず存在すること**を必須条件にする（GDD §6 v0.14）
+  for (const e of stage.shielderSpawns) {
+    const canRicochet = reachPts.some((p) => findOuterWallRicochet(stage, p.x, p.y, e.x, e.y));
+    if (!canRicochet) return false;
+  }
+
+  // 移動する敵（B・D・F・S）は動ける床の広がりが必要
+  const movers = [
+    ...stage.roverSpawns,
+    ...stage.minelayerSpawns,
+    ...stage.chaserSpawns,
+    ...stage.shielderSpawns,
+  ];
   for (const m of movers) {
     const area = reachable(g, Math.floor(m.x / T), Math.floor(m.y / T));
     if (area.size < 30) return false;
@@ -189,12 +204,12 @@ function validate(g: Grid, kinds: string[]): boolean {
 function compositionFor(n: number): string[] {
   const pools: [number, string[]][] = [
     [22, ["A", "B", "C", "D"]], // M17-22：既知の4種で3体
-    [30, ["A", "B", "C", "D", "E", "F"]], // M23-30：E/F が混ざる4体
-    [40, ["A", "B", "C", "D", "E", "F", "G"]], // M31-40：全7種から5体
-    [49, ["A", "B", "C", "D", "E", "F", "G"]], // M41-49：6体
+    [30, ["A", "B", "C", "D", "E", "F", "V", "M"]], // M23-30：E/F と新種 V/M が混ざる4体
+    [40, ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]], // M31-40：全10種から5体
+    [49, ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]], // M41-49：6体
   ];
   const count = n <= 22 ? 3 : n <= 30 ? 4 : n <= 40 ? 5 : 6;
-  if (n === 50) return ["A", "B", "C", "D", "E", "F", "G"]; // 最終面は全7種
+  if (n === 50) return ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]; // 最終面は全10種
   const pool = pools.find(([hi]) => n <= hi)![1];
   const rand = rng(n * 7919);
   const out: string[] = [];

@@ -33,9 +33,12 @@ import { type Difficulty, type DifficultyMods, resolveDifficulty } from "./diffi
 import { tryFire } from "./firing";
 import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
-import { type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
+import { destroyXTiles, type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
 import { createMinelayer, type MinelayerTank, updateMinelayer } from "./minelayer";
+import { createMortar, type MortarTank, updateMortar } from "./mortar";
 import { createPrism, type PrismTank, updatePrism } from "./prism";
+import { createShielder, shieldBlocks, type ShielderTank, updateShielder } from "./shielder";
+import { createVolley, type VolleyTank, updateVolley } from "./volley";
 import { createReflector, type ReflectorTank, updateReflector } from "./reflector";
 import { createRover, type RoverTank, updateRover } from "./rover";
 import { createSentry, type SentryTank, updateSentry } from "./sentry";
@@ -55,7 +58,10 @@ export type EnemyTank =
   | MinelayerTank
   | ReflectorTank
   | ChaserTank
-  | PrismTank;
+  | PrismTank
+  | ShielderTank
+  | VolleyTank
+  | MortarTank;
 
 /** ミッション定義（src/stages/missions.ts の要素と互換） */
 export interface MissionDef {
@@ -74,7 +80,8 @@ export type WorldEvent =
   | "mineExploded" // 地雷起爆
   | "missionClear" // ミッションクリア
   | "gameOver" // ゲームオーバー
-  | "allClear"; // 全ミッションクリア
+  | "allClear" // 全ミッションクリア
+  | "shieldBlock"; // 敵S「シールダー」の盾が弾を防いだ（GDD §6 v0.14）
 
 function createPlayer(x: number, y: number, index: number): PlayerTank {
   return {
@@ -166,6 +173,9 @@ export class GameWorld {
       ...this.stage.reflectorSpawns.map((sp) => createReflector(sp.x, sp.y, this.rng, this.mods)),
       ...this.stage.chaserSpawns.map((sp) => createChaser(sp.x, sp.y, this.rng, this.mods)),
       ...this.stage.prismSpawns.map((sp) => createPrism(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.shielderSpawns.map((sp) => createShielder(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.volleySpawns.map((sp) => createVolley(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.mortarSpawns.map((sp) => createMortar(sp.x, sp.y, this.rng, this.mods)),
     ];
     this.bullets = [];
     this.mines = [];
@@ -340,6 +350,37 @@ export class GameWorld {
             mods: this.mods,
           });
           break;
+        case "volley": // 敵V：3連射（GDD §6 v0.14）
+          updateVolley(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+            mods: this.mods,
+          });
+          break;
+        case "mortar": // 敵M：榴弾（炸裂は弾側の fuse で処理。GDD §6 v0.14）
+          updateMortar(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+            mods: this.mods,
+          });
+          break;
+        case "shielder": // 敵S：盾持ち（正面からの弾を無効化。GDD §6 v0.14）
+          updateShielder(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+            mods: this.mods,
+          });
+          break;
         case "rover":
           updateRover(e, dt, {
             players: this.players,
@@ -388,6 +429,19 @@ export class GameWorld {
       updateBullet(b, dt, this.stage);
       updateBulletArming(b); // 発射者から離れたら発射者にも当たるようにする（GDD §5.3 v0.12）
       if (b.bounces > prevBounces) this.events.push("bounce");
+      // 榴弾（敵M「ボマー」）の炸裂：爆風はプレイヤーにのみ当たり、X壁を壊す（GDD §6 v0.14・§5.2）
+      if (b.detonated) {
+        b.detonated = false;
+        const blast = b.blastRadius ?? BALANCE.BULLET.SHELL_BLAST_RADIUS;
+        this.lastExplosions.push({ x: b.x, y: b.y });
+        this.events.push("mineExploded");
+        for (const p of this.players) {
+          if (!p.alive) continue;
+          const rr = blast + p.radius;
+          if ((p.x - b.x) ** 2 + (p.y - b.y) ** 2 < rr * rr) p.alive = false;
+        }
+        if (destroyXTiles(this.stage, b.x, b.y, blast) > 0) this.stageVersion++;
+      }
     }
 
     // --- 弾同士の相殺（消えた数の前後差分から相殺回数＝2発1組を数える） ---
@@ -435,6 +489,11 @@ export class GameWorld {
         if (e === b.owner && !b.armed) continue; // 同上（発射直後の自弾）
         if (e.alive && bulletHitsTank(b, e)) {
           b.dead = true;
+          // 敵S「シールダー」は盾の正面（±60°）から来た弾を無効化する（GDD §6 v0.14）
+          if (e.kind === "shielder" && shieldBlocks(e, b)) {
+            this.events.push("shieldBlock");
+            break;
+          }
           e.alive = false; // 耐久1：即撃破
           break;
         }

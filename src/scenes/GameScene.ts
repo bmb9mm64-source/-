@@ -638,6 +638,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** 戦車1台の描画（車体矩形＋キャタピラ＋砲塔円＋砲身矩形） */
+  /** シールダーの盾（守っている角度の弧）を描く。跳弾で背後を狙う判断材料になる（GDD §6 v0.14） */
+  private drawShield(e: TankBody & { shieldAngle: number }): void {
+    const g = this.dynGfx;
+    const r = e.radius + 6;
+    g.lineStyle(4, COLORS.SHIELDER_SHIELD, 0.95);
+    g.beginPath();
+    g.arc(e.x, e.y, r, e.shieldAngle - BALANCE.SHIELDER.SHIELD_ARC, e.shieldAngle + BALANCE.SHIELDER.SHIELD_ARC);
+    g.strokePath();
+  }
+
   private drawTank(tank: TankBody, body: number, track: number, turret: number): void {
     const gfx = this.dynGfx;
     const s = tank.half * 2;
@@ -712,6 +722,16 @@ export class GameScene extends Phaser.Scene {
           break;
         case "prism": // 敵G：マゼンタ（赤紫）系（GDD §6 v0.10）
           this.drawTank(e, COLORS.PRISM_BODY, COLORS.PRISM_TRACK, COLORS.PRISM_TURRET);
+          break;
+        case "volley": // 敵V：橙赤（バーミリオン）系（GDD §6 v0.14）
+          this.drawTank(e, COLORS.VOLLEY_BODY, COLORS.VOLLEY_TRACK, COLORS.VOLLEY_TURRET);
+          break;
+        case "mortar": // 敵M：深緑（オリーブ）系
+          this.drawTank(e, COLORS.MORTAR_BODY, COLORS.MORTAR_TRACK, COLORS.MORTAR_TURRET);
+          break;
+        case "shielder": // 敵S：鋼青系＋盾の弧（守っている向きが一目で分かるように描く）
+          this.drawTank(e, COLORS.SHIELDER_BODY, COLORS.SHIELDER_TRACK, COLORS.SHIELDER_TURRET);
+          this.drawShield(e);
           break;
         case "chaser": // 敵F：白銀系（GDD §6 v0.9）
           this.drawTank(e, COLORS.CHASER_BODY, COLORS.CHASER_TRACK, COLORS.CHASER_TURRET);

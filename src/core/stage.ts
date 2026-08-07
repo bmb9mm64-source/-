@@ -26,6 +26,9 @@ export interface ParsedStage {
   reflectorSpawns: Vec2[]; // 敵E「リフレクター」の初期位置（GDD §7 v0.9）
   chaserSpawns: Vec2[]; // 敵F「チェイサー」の初期位置（GDD §7 v0.9）
   prismSpawns: Vec2[]; // 敵G「プリズム」の初期位置（GDD §7 v0.10）
+  shielderSpawns: Vec2[]; // 敵S「シールダー」の初期位置（GDD §7 v0.14）
+  volleySpawns: Vec2[]; // 敵V「バースター」の初期位置（GDD §7 v0.14）
+  mortarSpawns: Vec2[]; // 敵M「ボマー」の初期位置（GDD §7 v0.14）
 }
 
 /** パーサのオプション（省略時は GDD §7 の正規サイズ。テストでは小さい盤面を渡せる） */
@@ -53,6 +56,9 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
   const reflectorSpawns: Vec2[] = [];
   const chaserSpawns: Vec2[] = [];
   const prismSpawns: Vec2[] = [];
+  const shielderSpawns: Vec2[] = [];
+  const volleySpawns: Vec2[] = [];
+  const mortarSpawns: Vec2[] = [];
 
   for (let r = 0; r < lines.length; r++) {
     const rowStr = lines[r]!;
@@ -88,6 +94,15 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
       } else if (ch === "G") {
         prismSpawns.push({ x: cx, y: cy });
         ch = ".";
+      } else if (ch === "S") {
+        shielderSpawns.push({ x: cx, y: cy });
+        ch = ".";
+      } else if (ch === "V") {
+        volleySpawns.push({ x: cx, y: cy });
+        ch = ".";
+      } else if (ch === "M") {
+        mortarSpawns.push({ x: cx, y: cy });
+        ch = ".";
       }
       line.push(ch);
     }
@@ -107,6 +122,9 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
     reflectorSpawns,
     chaserSpawns,
     prismSpawns,
+    shielderSpawns,
+    volleySpawns,
+    mortarSpawns,
   };
 }
 
