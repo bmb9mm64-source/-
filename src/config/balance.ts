@@ -138,9 +138,21 @@ export const BALANCE = {
   },
 
   FX: {
-    // 画面演出（見た目のみ。ゲームロジックには影響しない）
+    // 画面演出（見た目のみ。ゲームロジックには影響しない。GDD §8.5）
     EXPLOSION_TIME: 0.35, // 爆発フラッシュの表示時間 [s]
     MINE_BLINK_HZ: 3, // 地雷ランプの点滅周波数 [Hz]
+    DESTROY_FLASH_RADIUS: 26, // 戦車撃破フラッシュの最終半径 [px]（地雷爆風より小さい）
+    DESTROY_PARTICLES: 14, // 撃破時の破片パーティクル数
+    PARTICLE_SPEED_MIN: 60, // 破片の初速（最小）[px/s]
+    PARTICLE_SPEED_MAX: 220, // 破片の初速（最大）[px/s]
+    PARTICLE_LIFE: 0.4, // 破片の寿命 [s]（GDD §8.5：演出は 0.3〜0.5s でテンポを損なわない）
+    PARTICLE_SIZE_MIN: 2, // 破片の辺長（最小）[px]
+    PARTICLE_SIZE_MAX: 5, // 破片の辺長（最大）[px]
+    SHAKE_DESTROY_DURATION: 0.12, // 撃破時の画面揺れ時間 [s]（軽い揺れ）
+    SHAKE_DESTROY_INTENSITY: 0.003, // 撃破時の揺れ強さ（Phaser camera shake の割合値）
+    SHAKE_MINE_DURATION: 0.2, // 地雷爆発時の画面揺れ時間 [s]（一回り大きい。GDD §8.5）
+    SHAKE_MINE_INTENSITY: 0.006, // 地雷爆発時の揺れ強さ
+    CLEAR_BANNER_TIME: 1.0, // 「CLEAR!」表示時間 [s]（GAME.BANNER_TIME より短くし、残りで次ミッションバナーを見せる）
   },
 
   LOS_STEP: 6, // 射線判定（レイキャスト）のサンプリング間隔 [px]
@@ -182,6 +194,8 @@ export const COLORS = {
   ENEMY_MINE: 0x4d4433, // 敵（マインレイヤー）設置の地雷本体（形は同じ・配色差で識別）
   ENEMY_MINE_LAMP: 0xffb13d, // 敵地雷の点滅ランプ（琥珀色）
   EXPLOSION: 0xffb347, // 爆風フラッシュ
+  DEBRIS: [0xffc07f, 0xf2f0e6, 0x6b7386, 0xff8a5c] as readonly number[], // 撃破破片パーティクルの配色（コード描画。GDD §8.5）
+  RECORD_CSS: "#ffd763", // NEW RECORD! ・ベスト表示の強調色（CSS 文字列）
   BULLET: 0xf2f0e6,
   BULLET_EDGE: 0x8f8c7c,
   CROSSHAIR: 0xe8ecf5,

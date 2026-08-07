@@ -14,16 +14,40 @@ import Phaser from "phaser";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import { eightWayAngle, type PlayerInput } from "../core/input";
+import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
 import { ALL_MISSIONS } from "../stages/allMissions";
 
-/** 爆発フラッシュ演出（見た目のみ） */
+/** タイム表示用の等幅フォント（tabular＝桁幅が揃う描画にして桁ブレを防ぐ） */
+const MONO_FONT = '"Consolas", "Menlo", "Courier New", monospace';
+
+/** 爆発フラッシュ演出（見た目のみ。fromRadius→toRadius へ拡大しながらフェードアウト） */
 interface ExplosionFx {
   x: number;
   y: number;
   age: number; // 経過時間 [s]
+  fromRadius: number; // 開始半径 [px]
+  toRadius: number; // 最終半径 [px]（地雷＝爆風半径／戦車撃破＝一回り小さい）
+}
+
+/** 撃破破片パーティクル（コード描画の矩形破片。見た目のみ。GDD §8.5） */
+interface Particle {
+  x: number;
+  y: number;
+  vx: number; // 速度 [px/s]
+  vy: number;
+  age: number; // 経過時間 [s]
+  size: number; // 辺長 [px]
+  color: number;
+}
+
+/** ミッションクリア演出の表示状態（GDD §8.5：タイム＋ベスト更新なら NEW RECORD!） */
+interface ClearFx {
+  time: number; // 確定クリアタイム [s]
+  newRecord: boolean;
+  timer: number; // 残り表示時間 [s]
 }
 
 export class GameScene extends Phaser.Scene {
@@ -36,7 +60,12 @@ export class GameScene extends Phaser.Scene {
   private mine2Requested = false; // 2P（キーボード 右Shift）
   private gamepad = new GamepadPoller(); // 2P パッド（毎フレーム接続確認）
   private explosionsFx: ExplosionFx[] = [];
+  private particles: Particle[] = []; // 撃破破片パーティクル（GDD §8.5）
   private lastStageVersion = -1; // 盤面描画キャッシュの版（X 破壊・ミッション切替で再描画）
+  private records = new Records(safeLocalStorageStore()); // ベスト記録（localStorage。GDD §8.5）
+  private newRecordMissions = new Set<number>(); // このランでベスト更新したミッション番号（1始まり。全クリア一覧の ★NEW! 表示用）
+  private clearFx: ClearFx | null = null; // ミッションクリア演出（バナー中に CLEAR! を表示）
+  private allClearText = ""; // 全クリア画面のタイム一覧（allClear イベント時に構築）
 
   private keys!: {
     w: Phaser.Input.Keyboard.Key;
@@ -60,6 +89,7 @@ export class GameScene extends Phaser.Scene {
   private crosshairGfx!: Phaser.GameObjects.Graphics; // 十字カーソル（最前面）
   private hudLeft!: Phaser.GameObjects.Text;
   private hudRight!: Phaser.GameObjects.Text;
+  private hudTime!: Phaser.GameObjects.Text; // 現ミッションの経過タイム（GDD §8.5）
   private overlayGfx!: Phaser.GameObjects.Graphics;
   private overlayTitle!: Phaser.GameObjects.Text;
   private overlaySub!: Phaser.GameObjects.Text;
@@ -86,7 +116,12 @@ export class GameScene extends Phaser.Scene {
     this.mine2Requested = false;
     this.gamepad = new GamepadPoller();
     this.explosionsFx = [];
+    this.particles = [];
     this.lastStageVersion = -1;
+    this.records = new Records(safeLocalStorageStore());
+    this.newRecordMissions = new Set();
+    this.clearFx = null;
+    this.allClearText = "";
 
     this.input.setDefaultCursor("none"); // 自前の十字カーソルを描くため OS カーソルは隠す
     this.input.mouse?.disableContextMenu(); // 右クリック＝地雷設置のためコンテキストメニューを抑止
@@ -107,6 +142,11 @@ export class GameScene extends Phaser.Scene {
     };
     this.hudLeft = this.add.text(10, 16, "", hudStyle).setOrigin(0, 0.5).setDepth(5);
     this.hudRight = this.add.text(w - 10, 16, "", hudStyle).setOrigin(1, 0.5).setDepth(5);
+    // 経過タイム（0.1秒単位。等幅フォント＝tabular 描画で桁ブレを防ぐ。GDD §8.5）
+    this.hudTime = this.add
+      .text(w / 2, 16, "", { ...hudStyle, fontFamily: MONO_FONT })
+      .setOrigin(0.5, 0.5)
+      .setDepth(5);
 
     // --- オーバーレイ（バナー・ポーズ・ゲームオーバー・全クリア） ---
     this.overlayGfx = this.add.graphics().setDepth(10).setVisible(false);
@@ -167,6 +207,8 @@ export class GameScene extends Phaser.Scene {
       }
       this.world.resetGame();
       this.paused = false;
+      this.newRecordMissions.clear(); // ランのやり直し＝NEW 表示もリセット
+      this.clearFx = null;
     });
     // スペース：1P 地雷設置（1押下1設置）
     kb.on("keydown-SPACE", () => {
@@ -197,6 +239,8 @@ export class GameScene extends Phaser.Scene {
       if (this.world.status === "gameover") {
         this.world.resetGame(); // クリックで M1 から再スタート（残機3）
         this.paused = false;
+        this.newRecordMissions.clear(); // ランのやり直し＝NEW 表示もリセット
+        this.clearFx = null;
         return;
       }
       if (this.world.status === "allclear") {
@@ -249,10 +293,36 @@ export class GameScene extends Phaser.Scene {
       if (this.playerCount === 2) inputs.push(this.buildP2Input());
       this.world.update(dt, inputs);
 
-      // ワールドの出来事を効果音・爆発演出に変換する
-      for (const ev of this.world.events) SFX.play(ev);
+      // ワールドの出来事を効果音・演出・記録更新に変換する
+      for (const ev of this.world.events) {
+        SFX.play(ev);
+        if (ev === "missionClear" || ev === "allClear") this.onMissionCleared(ev === "allClear");
+      }
+      // 戦車撃破：破片パーティクル＋小フラッシュ（GDD §8.5）
+      for (const d of this.world.lastDestroyedTanks) this.spawnDestroyFx(d.x, d.y);
+      // 地雷爆発：爆風フラッシュ（地雷半径→爆風半径）
       for (const ex of this.world.lastExplosions) {
-        this.explosionsFx.push({ x: ex.x, y: ex.y, age: 0 });
+        this.explosionsFx.push({
+          x: ex.x,
+          y: ex.y,
+          age: 0,
+          fromRadius: BALANCE.MINE.RADIUS,
+          toRadius: BALANCE.MINE.BLAST_RADIUS,
+        });
+      }
+      // 画面揺れ：地雷爆発＝一回り大きい（優先・強制上書き）／撃破＝軽い揺れ（GDD §8.5）
+      if (this.world.lastExplosions.length > 0) {
+        this.cameras.main.shake(
+          BALANCE.FX.SHAKE_MINE_DURATION * 1000,
+          BALANCE.FX.SHAKE_MINE_INTENSITY,
+          true,
+        );
+      } else if (this.world.lastDestroyedTanks.length > 0) {
+        this.cameras.main.shake(
+          BALANCE.FX.SHAKE_DESTROY_DURATION * 1000,
+          BALANCE.FX.SHAKE_DESTROY_INTENSITY,
+          false,
+        );
       }
     }
     // 押下エッジ要求は毎フレーム消費（不発・ポーズ中・パッド切替時も持ち越さない）
@@ -261,13 +331,96 @@ export class GameScene extends Phaser.Scene {
     this.fire2Requested = false;
     this.mine2Requested = false;
 
-    // 爆発フラッシュの経過（ポーズ中は進めない）
+    // 爆発フラッシュ・破片・クリア演出の経過（ポーズ中は進めない）
     if (!this.paused) {
       for (const fx of this.explosionsFx) fx.age += dt;
       this.explosionsFx = this.explosionsFx.filter((fx) => fx.age < BALANCE.FX.EXPLOSION_TIME);
+      for (const p of this.particles) {
+        p.age += dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+      }
+      this.particles = this.particles.filter((p) => p.age < BALANCE.FX.PARTICLE_LIFE);
+      if (this.clearFx) {
+        this.clearFx.timer -= dt;
+        // 表示時間終了か、バナーを抜けたら消す（残り時間で次の「MISSION n」バナーを見せる）
+        if (this.clearFx.timer <= 0 || this.world.status !== "banner") this.clearFx = null;
+      }
     }
 
     this.redraw(pointer);
+  }
+
+  /**
+   * ミッションクリア時の記録更新と演出準備（GDD §8.5）。
+   * ベスト更新判定は records（localStorage）へ提出して行い、
+   * 通常クリアは CLEAR! 演出、全クリアはタイム一覧テキストを構築する。
+   */
+  private onMissionCleared(isAllClear: boolean): void {
+    const idx = this.world.lastClearIndex;
+    const time = this.world.lastClearTime;
+    if (idx === null || time === null) return;
+    const newRecord = this.records.submitMissionTime(idx + 1, time);
+    if (newRecord) this.newRecordMissions.add(idx + 1);
+    if (isAllClear) {
+      this.buildAllClearText();
+    } else {
+      this.clearFx = { time, newRecord, timer: BALANCE.FX.CLEAR_BANNER_TIME };
+    }
+  }
+
+  /** 全クリア画面のタイム一覧（各ミッション・合計・ベスト比較）を構築する（GDD §8.5） */
+  private buildAllClearText(): void {
+    const world = this.world;
+    const lines: string[] = [];
+    for (let i = 0; i < world.missions.length; i++) {
+      const t = world.clearedTimes[i];
+      if (t === undefined) continue; // 途中ミッション開始のデバッグランでは一部欠ける
+      const best = this.records.missionBest(i + 1);
+      const bestStr = best !== null ? formatTime(best).padStart(6, " ") : "  --.-";
+      const mark = this.newRecordMissions.has(i + 1) ? " ★NEW!" : "";
+      lines.push(
+        `M${String(i + 1).padEnd(2, " ")} ${formatTime(t).padStart(6, " ")}s / ベスト ${bestStr}s${mark}`,
+      );
+    }
+    const total = world.totalTime;
+    if (total !== null) {
+      // 通しトータルベストは M1 から全ミッションを通したランのみ対象（GDD §8.5）
+      const totalNewRecord = this.records.submitTotalTime(total);
+      const best = this.records.totalBest();
+      const bestStr = best !== null ? formatTime(best).padStart(6, " ") : "  --.-";
+      lines.push("");
+      lines.push(
+        `合計 ${formatTime(total).padStart(6, " ")}s / ベスト ${bestStr}s${totalNewRecord ? " ★NEW!" : ""}`,
+      );
+    }
+    this.allClearText = lines.join("\n");
+  }
+
+  /** 戦車撃破の演出：破片パーティクル＋小フラッシュを発生させる（コード描画のみ。GDD §8.5） */
+  private spawnDestroyFx(x: number, y: number): void {
+    const F = BALANCE.FX;
+    this.explosionsFx.push({
+      x,
+      y,
+      age: 0,
+      fromRadius: BALANCE.BULLET.RADIUS,
+      toRadius: F.DESTROY_FLASH_RADIUS,
+    });
+    for (let i = 0; i < F.DESTROY_PARTICLES; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = F.PARTICLE_SPEED_MIN + Math.random() * (F.PARTICLE_SPEED_MAX - F.PARTICLE_SPEED_MIN);
+      const size = F.PARTICLE_SIZE_MIN + Math.random() * (F.PARTICLE_SIZE_MAX - F.PARTICLE_SIZE_MIN);
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        age: 0,
+        size,
+        color: COLORS.DEBRIS[Math.floor(Math.random() * COLORS.DEBRIS.length)]!,
+      });
+    }
   }
 
   /** 盤面（床・グリッド・壁・破壊可能壁・穴）の描画。X 破壊やミッション切替時に呼び直す */
@@ -408,12 +561,19 @@ export class GameScene extends Phaser.Scene {
       this.dynGfx.strokeCircle(b.x, b.y, b.radius);
     }
 
-    // 爆発フラッシュ（地雷半径→爆風半径へ拡大しながらフェードアウト）
+    // 爆発フラッシュ（開始半径→最終半径へ拡大しながらフェードアウト。地雷＝爆風大／撃破＝小）
     for (const fx of this.explosionsFx) {
       const k = fx.age / BALANCE.FX.EXPLOSION_TIME; // 0→1
-      const radius = BALANCE.MINE.RADIUS + (BALANCE.MINE.BLAST_RADIUS - BALANCE.MINE.RADIUS) * k;
+      const radius = fx.fromRadius + (fx.toRadius - fx.fromRadius) * k;
       this.dynGfx.fillStyle(COLORS.EXPLOSION, 1 - k);
       this.dynGfx.fillCircle(fx.x, fx.y, radius);
+    }
+
+    // 撃破破片パーティクル（矩形破片が飛び散りフェードアウト。GDD §8.5）
+    for (const p of this.particles) {
+      const alpha = 1 - p.age / BALANCE.FX.PARTICLE_LIFE;
+      this.dynGfx.fillStyle(p.color, alpha);
+      this.dynGfx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
 
     // HUD（ミッション番号・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§12.5）
@@ -424,27 +584,60 @@ export class GameScene extends Phaser.Scene {
     }
     this.hudLeft.setText(left);
     this.hudRight.setText(`撃破: ${world.kills}　敵: ${world.enemiesLeft()}${SFX.muted ? "　[消音]" : ""}`);
+    // 現ミッションの経過タイム（0.1秒単位。固定幅にそろえて桁ブレを防ぐ。GDD §8.5）
+    this.hudTime.setText(`TIME ${formatTime(world.missionTime).padStart(6, " ")}`);
 
     // オーバーレイ
+    const h = BALANCE.TILE * BALANCE.ROWS;
     let title = "";
     let sub = "";
+    let subColor: string = COLORS.HUD_CSS;
     if (this.paused) {
       title = "PAUSED";
       sub = "Esc / P で再開";
     } else if (world.status === "banner") {
-      title = `MISSION ${world.missionIndex + 1}`;
-      sub = world.missions[world.missionIndex]!.name;
+      if (this.clearFx) {
+        // ミッションクリア演出：タイム＋ベスト更新なら NEW RECORD!（GDD §8.5）
+        title = "CLEAR!";
+        sub = `タイム ${formatTime(this.clearFx.time)}s${this.clearFx.newRecord ? "　NEW RECORD!" : ""}`;
+        if (this.clearFx.newRecord) subColor = COLORS.RECORD_CSS;
+      } else {
+        title = `MISSION ${world.missionIndex + 1}`;
+        sub = world.missions[world.missionIndex]!.name;
+      }
     } else if (world.status === "gameover") {
       title = "GAME OVER";
       sub = "R またはクリックで M1 から再スタート";
     } else if (world.status === "allclear") {
       title = "ALL CLEAR!";
-      sub = `全ミッション制覇！ 撃破: ${world.kills}　R またはクリックでタイトルへ`;
+      sub =
+        `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
+        `${this.allClearText}\n\n` +
+        "R またはクリックでタイトルへ";
     }
     const showOverlay = title !== "";
+    // 全クリア画面はタイム一覧が長いため上寄せ・等幅小フォントに切り替える（GDD §8.5）
+    const isAllClearScreen = !this.paused && world.status === "allclear";
+    if (isAllClearScreen) {
+      this.overlayTitle.setY(64);
+      this.overlaySub
+        .setY(104)
+        .setOrigin(0.5, 0)
+        .setFontFamily(MONO_FONT)
+        .setFontSize(15)
+        .setLineSpacing(5);
+    } else {
+      this.overlayTitle.setY(h / 2 - 18);
+      this.overlaySub
+        .setY(h / 2 + 26)
+        .setOrigin(0.5, 0.5)
+        .setFontFamily("sans-serif")
+        .setFontSize(16)
+        .setLineSpacing(0);
+    }
     this.overlayGfx.setVisible(showOverlay);
     this.overlayTitle.setVisible(showOverlay).setText(title);
-    this.overlaySub.setVisible(showOverlay).setText(sub);
+    this.overlaySub.setVisible(showOverlay).setText(sub).setColor(subColor);
 
     // 十字カーソル（1P マウス照準。オーバーレイより前面）
     const gfx = this.crosshairGfx;

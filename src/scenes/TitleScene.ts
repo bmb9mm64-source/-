@@ -6,6 +6,7 @@
 import Phaser from "phaser";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
+import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 
 export class TitleScene extends Phaser.Scene {
   constructor() {
@@ -119,5 +120,17 @@ export class TitleScene extends Phaser.Scene {
       yoyo: true,
       repeat: -1,
     });
+
+    // 通しトータルベスト（記録があれば小さく表示。localStorage 読み出し。GDD §8.5）
+    const totalBest = new Records(safeLocalStorageStore()).totalBest();
+    if (totalBest !== null) {
+      this.add
+        .text(w / 2, h - 22, `通しベスト: ${formatTime(totalBest)}s（全ミッション合計）`, {
+          fontFamily: "sans-serif",
+          fontSize: "13px",
+          color: COLORS.RECORD_CSS,
+        })
+        .setOrigin(0.5);
+    }
   }
 }

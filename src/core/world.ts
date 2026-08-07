@@ -88,6 +88,13 @@ export class GameWorld {
   mines: Mine[] = [];
   events: WorldEvent[] = []; // 直近の update で起きた出来事
   lastExplosions: Explosion[] = []; // 直近の update で起きた爆発の座標（演出用）
+  lastDestroyedTanks: { x: number; y: number }[] = []; // 直近の update で撃破された戦車の座標（敵＋プレイヤー。撃破演出用。GDD §8.5）
+
+  // --- ミッションタイム（GDD §8.5。バナー中は進まない。ポーズはシーン側が update を呼ばないため自然に停止） ---
+  missionTime = 0; // 現ミッションの経過タイム [s]（loadMission＝ミッション切替・被弾リセットで 0 に戻る）
+  clearedTimes: number[] = []; // このランでクリアした各ミッションの確定タイム [s]（添字＝ミッション番号-1。resetGame で全消去）
+  lastClearIndex: number | null = null; // 直近にクリアしたミッションの添字（missionClear / allClear イベントと同時に確定）
+  lastClearTime: number | null = null; // 直近にクリアしたミッションの確定タイム [s]
 
   private readonly rng: Rng;
 
@@ -132,13 +139,31 @@ export class GameWorld {
     this.grace = BALANCE.GAME.START_GRACE;
     this.status = "banner";
     this.bannerTimer = BALANCE.GAME.BANNER_TIME;
+    this.missionTime = 0; // 被弾リセット・ミッション切替でそのミッションのタイムはリセット（GDD §8.5）
   }
 
   /** ゲーム全体を最初からやり直す（Rキー・ゲームオーバー後の再開） */
   resetGame(): void {
     this.lives = BALANCE.GAME.LIVES;
     this.kills = 0;
+    this.clearedTimes = []; // タイム記録もランごとにやり直し（GDD §8.5）
+    this.lastClearIndex = null;
+    this.lastClearTime = null;
     this.loadMission(0);
+  }
+
+  /**
+   * 通しトータルタイム（M1〜最終ミッションのこのランの合計 [s]。GDD §8.5）。
+   * 全ミッションのタイムが揃っていなければ null（途中ミッション開始のデバッグランなどは対象外）。
+   */
+  get totalTime(): number | null {
+    let sum = 0;
+    for (let i = 0; i < this.missions.length; i++) {
+      const t = this.clearedTimes[i];
+      if (t === undefined) return null;
+      sum += t;
+    }
+    return sum;
   }
 
   /**
@@ -167,6 +192,7 @@ export class GameWorld {
   update(dt: number, inputs: readonly PlayerInput[]): void {
     this.events = [];
     this.lastExplosions = [];
+    this.lastDestroyedTanks = [];
 
     // --- 「MISSION n」バナー表示中（GDD §8：2秒表示→開始） ---
     if (this.status === "banner") {
@@ -178,6 +204,9 @@ export class GameWorld {
       return;
     }
     if (this.status !== "playing") return;
+
+    // --- ミッションタイム（プレイ中のみ計時。GDD §8.5） ---
+    this.missionTime += dt;
 
     // --- グレースタイマー ---
     if (this.grace > 0) this.grace -= dt;
@@ -299,6 +328,7 @@ export class GameWorld {
 
     // --- 地雷（起爆・誘爆・爆風による戦車/弾/X壁の破壊） ---
     const enemiesAliveBefore = this.enemiesLeft();
+    const enemiesAliveFlags = this.enemies.map((e) => e.alive); // 撃破位置の特定用（演出。GDD §8.5）
     const mineResult = updateMines(
       this.mines,
       dt,
@@ -347,12 +377,26 @@ export class GameWorld {
       if (playersAliveBefore[i] && !this.players[i]!.alive) this.events.push("playerHit");
     }
 
+    // --- 撃破された戦車の座標（敵＋プレイヤー。撃破パーティクル・画面揺れの演出用。GDD §8.5） ---
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i]!;
+      if (enemiesAliveFlags[i] && !e.alive) this.lastDestroyedTanks.push({ x: e.x, y: e.y });
+    }
+    for (let i = 0; i < this.players.length; i++) {
+      const p = this.players[i]!;
+      if (playersAliveBefore[i] && !p.alive) this.lastDestroyedTanks.push({ x: p.x, y: p.y });
+    }
+
     // --- 勝敗判定（全員退場を優先処理。片方生存なら続行。GDD §12.5） ---
     if (!this.players.some((p) => p.alive)) {
       this.onAllPlayersDown();
       return;
     }
     if (enemiesAliveAfter === 0) {
+      // クリアタイムの確定（シーンがベスト記録の更新判定・演出に使う。GDD §8.5）
+      this.clearedTimes[this.missionIndex] = this.missionTime;
+      this.lastClearIndex = this.missionIndex;
+      this.lastClearTime = this.missionTime;
       if (this.missionIndex + 1 >= this.missions.length) {
         this.status = "allclear"; // 全ミッションクリア
         this.events.push("allClear");
