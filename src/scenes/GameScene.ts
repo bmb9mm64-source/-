@@ -53,6 +53,7 @@ interface ClearFx {
 export class GameScene extends Phaser.Scene {
   private world!: GameWorld;
   private playerCount = 1; // TitleScene から渡されるモード（1 or 2）
+  private customPlay = false; // エディタからのテストプレイ（記録対象外・終了後はエディタへ。GDD §12.7）
   private paused = false; // ポーズはシーン側の責務（ポーズ中は world.update を呼ばない）
   private fireRequested = false; // 1P：1クリック1発の発射要求フラグ
   private mineRequested = false; // 1P：1押下1設置の地雷要求フラグ
@@ -98,15 +99,20 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  create(data: { playerCount?: number } = {}): void {
+  create(data: { playerCount?: number; customStage?: string[]; returnTo?: "editor" } = {}): void {
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
 
     this.playerCount = data.playerCount === 2 ? 2 : 1;
-    this.world = new GameWorld(ALL_MISSIONS, Math.random, this.playerCount);
-    // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる
+    // エディタからのテストプレイ（GDD §12.7）：カスタム1ミッション構成・ベスト記録は対象外
+    this.customPlay = data.returnTo === "editor" && Array.isArray(data.customStage);
+    const missions = this.customPlay
+      ? [{ name: "カスタムステージ", grid: data.customStage! }]
+      : ALL_MISSIONS;
+    this.world = new GameWorld(missions, Math.random, this.playerCount);
+    // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる（本編のみ）
     const mParam = Number(new URLSearchParams(window.location.search).get("m"));
-    if (Number.isInteger(mParam) && mParam >= 1 && mParam <= ALL_MISSIONS.length) {
+    if (!this.customPlay && Number.isInteger(mParam) && mParam >= 1 && mParam <= ALL_MISSIONS.length) {
       this.world.loadMission(mParam - 1);
     }
     this.paused = false;
@@ -198,9 +204,14 @@ export class GameScene extends Phaser.Scene {
     };
     kb.on("keydown-ESC", togglePause);
     kb.on("keydown-P", togglePause);
-    // R：全クリア画面ではタイトルへ、それ以外はゲーム全体をリスタート（M1・残機3）
+    // R：全クリア画面ではタイトルへ、それ以外はゲーム全体をリスタート（M1・残機3）。
+    // テストプレイ中はクリア/ゲームオーバーからエディタへ戻る（GDD §12.7）
     kb.on("keydown-R", () => {
       SFX.unlock();
+      if (this.customPlay && (this.world.status === "allclear" || this.world.status === "gameover")) {
+        this.scene.start("EditorScene");
+        return;
+      }
       if (this.world.status === "allclear") {
         this.scene.start("TitleScene");
         return;
@@ -236,6 +247,10 @@ export class GameScene extends Phaser.Scene {
     // クリック：1P 射撃（左）／地雷（右）。終了画面では再開操作
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       SFX.unlock(); // 自動再生制限の解除（ユーザー操作後の初期化）
+      if (this.customPlay && (this.world.status === "allclear" || this.world.status === "gameover")) {
+        this.scene.start("EditorScene"); // テストプレイ終了 → エディタへ戻る（GDD §12.7）
+        return;
+      }
       if (this.world.status === "gameover") {
         this.world.resetGame(); // クリックで M1 から再スタート（残機3）
         this.paused = false;
@@ -360,7 +375,8 @@ export class GameScene extends Phaser.Scene {
     const idx = this.world.lastClearIndex;
     const time = this.world.lastClearTime;
     if (idx === null || time === null) return;
-    const newRecord = this.records.submitMissionTime(idx + 1, time);
+    // テストプレイはベスト記録の対象外（GDD §12.7）
+    const newRecord = this.customPlay ? false : this.records.submitMissionTime(idx + 1, time);
     if (newRecord) this.newRecordMissions.add(idx + 1);
     if (isAllClear) {
       this.buildAllClearText();
@@ -372,6 +388,12 @@ export class GameScene extends Phaser.Scene {
   /** 全クリア画面のタイム一覧（各ミッション・合計・ベスト比較）を構築する（GDD §8.5） */
   private buildAllClearText(): void {
     const world = this.world;
+    if (this.customPlay) {
+      // テストプレイ：タイム表示のみ（ベスト比較・記録提出なし。GDD §12.7）
+      const t = world.clearedTimes[0];
+      this.allClearText = t !== undefined ? `タイム ${formatTime(t)}s（記録対象外）` : "";
+      return;
+    }
     const lines: string[] = [];
     for (let i = 0; i < world.missions.length; i++) {
       const t = world.clearedTimes[i];
@@ -607,13 +629,16 @@ export class GameScene extends Phaser.Scene {
       }
     } else if (world.status === "gameover") {
       title = "GAME OVER";
-      sub = "R またはクリックで M1 から再スタート";
+      sub = this.customPlay
+        ? "R またはクリックでエディタへ戻る"
+        : "R またはクリックで M1 から再スタート";
     } else if (world.status === "allclear") {
-      title = "ALL CLEAR!";
-      sub =
-        `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
-        `${this.allClearText}\n\n` +
-        "R またはクリックでタイトルへ";
+      title = this.customPlay ? "CLEAR!" : "ALL CLEAR!";
+      sub = this.customPlay
+        ? `${this.allClearText}\n\nR またはクリックでエディタへ戻る`
+        : `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
+          `${this.allClearText}\n\n` +
+          "R またはクリックでタイトルへ";
     }
     const showOverlay = title !== "";
     // 全クリア画面はタイム一覧が長いため上寄せ・等幅小フォントに切り替える（GDD §8.5）

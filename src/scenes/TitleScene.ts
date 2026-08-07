@@ -101,14 +101,27 @@ export class TitleScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => start(2));
 
+    // ステージエディタへの入口（GDD §12.7）
+    this.add
+      .text(w / 2, h / 2 + 182, "[E] ステージエディタ", {
+        ...textStyle,
+        fontSize: "15px",
+        backgroundColor: "#2b3040",
+        padding: { x: 12, y: 5 },
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => this.scene.start("EditorScene"));
+
     const kb = this.input.keyboard;
     kb?.on("keydown-ONE", () => start(1));
     kb?.on("keydown-TWO", () => start(2));
+    kb?.on("keydown-E", () => this.scene.start("EditorScene"));
 
     const prompt = this.add
-      .text(w / 2, h / 2 + 196, "クリックまたは 1 / 2 キーで選択", {
+      .text(w / 2, h / 2 + 220, "クリックまたは 1 / 2 / E キーで選択", {
         ...textStyle,
-        fontSize: "15px",
+        fontSize: "14px",
       })
       .setOrigin(0.5);
 
