@@ -524,11 +524,10 @@ export class GameWorld {
       if (playersAliveBefore[i] && !p.alive) this.lastDestroyedTanks.push({ x: p.x, y: p.y });
     }
 
-    // --- 勝敗判定（全員退場を優先処理。片方生存なら続行。GDD §12.5） ---
-    if (!this.players.some((p) => p.alive)) {
-      this.onAllPlayersDown();
-      return;
-    }
+    // --- 勝敗判定 ---
+    // 敵全滅とプレイヤー全員退場が同フレームに成立した場合は**クリアを優先**する（GDD §8 v0.15）。
+    // 逆順にすると、クリアが破棄されて残機が減るうえ、加算済みの撃破数だけが残って
+    // やり直し後に同じ敵を二重計上できてしまう。
     if (enemiesAliveAfter === 0) {
       // クリアタイムの確定（シーンがベスト記録の更新判定・演出に使う。GDD §8.5）
       this.clearedTimes[this.missionIndex] = this.missionTime;
@@ -541,6 +540,9 @@ export class GameWorld {
         this.events.push("missionClear");
         this.loadMission(this.missionIndex + 1); // 次ミッションのバナーへ（退場者も復帰）
       }
+      return;
     }
+    // 全員退場（片方生存なら続行。GDD §12.5）
+    if (!this.players.some((p) => p.alive)) this.onAllPlayersDown();
   }
 }

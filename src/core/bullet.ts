@@ -291,6 +291,7 @@ export function resolveBulletVsBullet(bullets: Bullet[]): void {
       if (dx * dx + dy * dy < rr * rr) {
         a.dead = true;
         c.dead = true;
+        break; // 1発は1発としか相殺しない（GDD §5「接触した2発が両方消滅」）
       }
     }
   }

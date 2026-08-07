@@ -13,20 +13,27 @@ Wii Play のミニゲーム「タンク！(Tanks!)」の**ゲームメカニク�
 |---|---|---|
 | プレイ形式 | シングルプレイ軸＋ローカル2P協力 | 2P協力はMVP完成後のフェーズで実装 |
 | 操作方法 | WASD移動＋マウス照準・クリック射撃 | 2P側の操作はGDDの未決事項参照 |
-| MVP規模 | 5ミッション・敵AI 2種 | 詳細は docs/gdd.md |
+| MVP規模（Phase 3 で達成済み） | 5ミッション・敵AI 2種 | 詳細は docs/gdd.md |
+| 現行規模 | 全50ミッション・敵AI 10種・難易度3段階 | M17以降は scripts/generateMissions.ts が生成し全条件を機械検証 |
 | 技術スタック | 素のHTML5 Canvas 1ファイルで試作 → 承認後 Phaser + Vite + TypeScript へ移行 | Phaser＝2Dゲーム用フレームワーク、Vite＝高速ビルドツール |
 
 ## 開発プロセス（フェーズゲート制）
 
 **各フェーズの終わりに、必ずオーナー（ユーザー）の確認・承認を得てから次へ進む。承認前に次フェーズのコードを書かない。**
 
-1. **Phase 0: 立ち上げ** — CLAUDE.md / エージェント定義 / docs/gdd.md の作成（本フェーズ）
-2. **Phase 1: プロトタイプ** — Canvas 1ファイル（`prototype/index.html`）で核メカニクス（移動・照準・跳弾・敵1種）を検証
-3. **Phase 2: 本実装移行** — Phaser + Vite + TypeScript へ移行、シーン管理・アセット導入
-4. **Phase 3: MVP完成** — 5ミッション・敵2種・地雷・UI・効果音
-5. **Phase 4: 拡張** — ローカル2P協力、敵種追加、ステージエディタ等（別途計画）
+1. **Phase 0: 立ち上げ**（完了）— CLAUDE.md / エージェント定義 / docs/gdd.md の作成
+2. **Phase 1: プロトタイプ**（完了）— Canvas 1ファイル（`prototype/index.html`）で核メカニクス（移動・照準・跳弾・敵1種）を検証
+3. **Phase 2: 本実装移行**（完了）— Phaser + Vite + TypeScript へ移行、シーン管理・アセット導入
+4. **Phase 3: MVP完成**（完了）— 5ミッション・敵2種・地雷・UI・効果音
+5. **Phase 4: 拡張**（完了）— 第1弾 ローカル2P協力／第2弾 敵C・D＋M6〜M10／第3弾 演出・タイム記録／第4弾 ステージエディタ
+6. **Phase 5: 敵E・F と難易度選択**（完了）— 固定砲台の跳弾狙撃を難易度連動で本格化、M11〜M15
+7. **Phase 6: 敵G・M16**（完了）— 3回反射弾、射撃の先行入力、画面のフィット拡大
+8. **Phase 7: タッチ操作・BGM**（完了）— スマホ対応と自作合成BGM
+9. **Phase 8: 50階層化・品質改善**（完了）— M17〜M50 の生成＋機械検証、到達記録「続きから」、自滅の禁止、敵S・V・M の追加（敵10種）
 
-## リポジトリ構成（予定）
+> 以後の新規アイデアは、実装前に GDD 末尾の拡張候補リストへ退避し、オーナーの承認を得てから着手する（スコープ管理の基準線）。
+
+## リポジトリ構成
 
 ```
 CLAUDE.md            … 本ファイル（プロジェクトの憲法）
@@ -34,9 +41,13 @@ CLAUDE.md            … 本ファイル（プロジェクトの憲法）
 docs/gdd.md          … ゲームデザインドキュメント（仕様の一次ソース）
 docs/decisions/      … 意思決定記録（ADR形式、必要になったら作成）
 prototype/           … Phase 1 の Canvas 1ファイル試作
-src/                 … Phase 2 以降の本実装（Phaser + TS）
-assets/              … オリジナル画像・音源（出所とライセンスを assets/CREDITS.md に必ず記録）
+src/                 … 本実装（Phaser + TS）。core/ は Phaser 非依存の純粋ロジック
+tests/               … Vitest の単体テスト（ミッションの機械検証を含む）
+scripts/             … 開発用ツール（generateMissions.ts＝M17〜M50 の生成器。ゲーム本体からは import しない）
+index.html / package.json / tsconfig.json / vite.config.ts … ビルド構成
 ```
+
+※ `assets/` は未作成。画像はコード描画、音は Web Audio の自作合成で、外部素材が1つもないため（導入する場合は `assets/CREDITS.md` に出所とライセンスを必ず記録する）。
 
 ## コーディング規約（Phase 2 以降）
 
