@@ -25,6 +25,8 @@ export const RECORD_KEYS = {
     `hanedan.best.${difficulty}.mission.${missionNumber}`,
   /** 通しトータルタイムのベスト */
   total: (difficulty: Difficulty): string => `hanedan.best.${difficulty}.total`,
+  /** 到達済みの最高ミッション番号（GDD §8.6 v0.13：「続きから」用） */
+  reached: (difficulty: Difficulty): string => `hanedan.reached.${difficulty}`,
 } as const;
 
 /** メモリ実装（テスト・localStorage 不可時のフォールバック。保存はセッション限り） */
@@ -128,5 +130,25 @@ export class Records {
     if (best !== null && time >= best) return false;
     this.store.set(RECORD_KEYS.total(this.difficulty), String(time));
     return true;
+  }
+
+  /**
+   * 到達済みの最高ミッション番号（1始まり。記録なし・壊れた値は 1＝最初から）。
+   * 全50ミッションを毎回 M1 からやり直すのは現実的でないため、続きから始められるようにする（GDD §8.6）。
+   */
+  reachedBest(): number {
+    const raw = this.store.get(RECORD_KEYS.reached(this.difficulty));
+    const n = parseStoredTime(raw);
+    if (n === null) return 1;
+    const i = Math.floor(n);
+    return i >= 1 ? i : 1;
+  }
+
+  /** 到達したミッション番号を提出する（より奥に進んだときだけ更新） */
+  submitReached(missionNumber: number): void {
+    if (!Number.isFinite(missionNumber) || missionNumber < 1) return;
+    const n = Math.floor(missionNumber);
+    if (n <= this.reachedBest()) return;
+    this.store.set(RECORD_KEYS.reached(this.difficulty), String(n));
   }
 }

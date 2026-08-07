@@ -14,8 +14,8 @@ import { findNearbyFloor, parseStage, tileAt } from "../src/core/stage";
 import { ALL_MISSIONS } from "../src/stages/allMissions";
 
 describe("本編ミッション構成", () => {
-  it("ミッションは16面ある（MVP 5面＋第2弾 5面＋Phase 5 5面＋M16）", () => {
-    expect(ALL_MISSIONS).toHaveLength(16);
+  it("ミッションは50面ある（手設計16面＋生成34面）", () => {
+    expect(ALL_MISSIONS).toHaveLength(50);
   });
 
   it("敵構成が GDD §7 の表と一致する", () => {
@@ -45,7 +45,8 @@ describe("本編ミッション構成", () => {
       { sentries: 0, rovers: 1, snipers: 1, minelayers: 1, reflectors: 1, chasers: 1 }, // M15
       { sentries: 1, rovers: 1, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0, prisms: 1 }, // M16
     ];
-    ALL_MISSIONS.forEach((m, i) => {
+    // 敵構成の表は手設計の M1〜M16 のみ（M17 以降は生成物のため構成は生成器が保証する）
+    ALL_MISSIONS.slice(0, expected.length).forEach((m, i) => {
       const stage = parseStage(m.grid);
       expect(stage.sentrySpawns, `${m.name} のセントリー数`).toHaveLength(expected[i]!.sentries);
       expect(stage.roverSpawns, `${m.name} のローバー数`).toHaveLength(expected[i]!.rovers);
@@ -110,6 +111,7 @@ for (const mission of ALL_MISSIONS) {
         ...stage.minelayerSpawns,
         ...stage.reflectorSpawns,
         ...stage.chaserSpawns,
+        ...stage.prismSpawns,
       ];
       for (const sp of spawns) {
         const col = Math.floor(sp.x / stage.tile);
@@ -128,6 +130,7 @@ for (const mission of ALL_MISSIONS) {
         ...stage.minelayerSpawns,
         ...stage.reflectorSpawns,
         ...stage.chaserSpawns,
+        ...stage.prismSpawns,
       ];
       expect(enemies.length).toBeGreaterThan(0);
       for (const e of enemies) {

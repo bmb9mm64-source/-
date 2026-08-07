@@ -65,7 +65,7 @@ export class TitleScene extends Phaser.Scene {
     const textStyle = { fontFamily: "sans-serif", color: COLORS.HUD_CSS };
 
     this.add
-      .text(w / 2, h / 2 - 56, "ハネダン！", {
+      .text(w / 2, h / 2 - 72, "ハネダン！", {
         ...textStyle,
         fontSize: "44px",
         fontStyle: "bold",
@@ -73,7 +73,7 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(w / 2, h / 2 - 16, "壁に弾を反射させて敵戦車を撃ち抜け", {
+      .text(w / 2, h / 2 - 34, "壁に弾を反射させて敵戦車を撃ち抜け", {
         ...textStyle,
         fontSize: "15px",
       })
@@ -83,7 +83,7 @@ export class TitleScene extends Phaser.Scene {
     this.add
       .text(
         w / 2,
-        h / 2 + 44,
+        h / 2 + 34,
         "【1P】WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ スペース・右クリック: 地雷\n" +
           "【2P】パッド: 左スティック移動・右スティック照準・RB射撃・LB地雷\n" +
           "　　　（パッド未接続時: 矢印キー移動・IJKL照準・Enter射撃・右Shift地雷）\n" +
@@ -137,10 +137,26 @@ export class TitleScene extends Phaser.Scene {
     this.input.keyboard?.on("keydown", startAudio);
     BGM.play("title"); // 既に初期化済み（別シーンから戻ってきた場合）なら即座に切り替わる
 
-    const start = (playerCount: number): void => {
+    const start = (playerCount: number, startMission?: number): void => {
       SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）
-      this.scene.start("GameScene", { playerCount });
+      this.scene.start("GameScene", { playerCount, startMission });
     };
+
+    // 「続きから」（到達済みの最高ミッションから開始。全50面を毎回1面からやり直さないため。GDD §8.6）
+    const reached = new Records(this.store, this.difficulty).reachedBest();
+    if (reached > 1) {
+      this.add
+        .text(w / 2, h / 2 + 178, `[3] 続きから（M${reached}）`, {
+          ...textStyle,
+          fontSize: "16px",
+          backgroundColor: "#2b3040",
+          padding: { x: 12, y: 5 },
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerdown", () => start(1, reached));
+      this.input.keyboard?.on("keydown-THREE", () => start(1, reached));
+    }
     const buttonStyle = {
       ...textStyle,
       fontSize: "22px",
@@ -161,7 +177,7 @@ export class TitleScene extends Phaser.Scene {
 
     // ステージエディタへの入口（GDD §12.7）
     this.add
-      .text(w / 2, h / 2 + 182, "[E] ステージエディタ", {
+      .text(w / 2, h / 2 + 208, "[E] ステージエディタ", {
         ...textStyle,
         fontSize: "15px",
         backgroundColor: "#2b3040",
@@ -177,7 +193,7 @@ export class TitleScene extends Phaser.Scene {
     kb?.on("keydown-E", () => this.scene.start("EditorScene"));
 
     const prompt = this.add
-      .text(w / 2, h / 2 + 220, "クリックまたは 1 / 2 / E キーで選択", {
+      .text(w / 2, h / 2 + 236, "クリックまたは 1 / 2 / 3 / E キーで選択", {
         ...textStyle,
         fontSize: "14px",
       })

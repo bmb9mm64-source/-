@@ -115,7 +115,14 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  create(data: { playerCount?: number; customStage?: string[]; returnTo?: "editor" } = {}): void {
+  create(
+    data: {
+      playerCount?: number;
+      customStage?: string[];
+      returnTo?: "editor";
+      startMission?: number; // 「続きから」で開始するミッション番号（1始まり。GDD §8.6）
+    } = {},
+  ): void {
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
 
@@ -130,8 +137,9 @@ export class GameScene extends Phaser.Scene {
     this.world = new GameWorld(missions, Math.random, this.playerCount, this.difficulty);
     // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる（本編のみ）
     const mParam = Number(new URLSearchParams(window.location.search).get("m"));
-    if (!this.customPlay && Number.isInteger(mParam) && mParam >= 1 && mParam <= ALL_MISSIONS.length) {
-      this.world.loadMission(mParam - 1);
+    const start = Number.isInteger(data.startMission) ? data.startMission! : mParam;
+    if (!this.customPlay && Number.isInteger(start) && start >= 1 && start <= ALL_MISSIONS.length) {
+      this.world.loadMission(start - 1);
     }
     this.paused = false;
     this.fireRequested = false;
@@ -144,7 +152,11 @@ export class GameScene extends Phaser.Scene {
     this.touch.reset();
     this.touchMode = false;
     this.lastTouch = null;
-    this.input.addPointer(BALANCE.TOUCH.MAX_POINTERS - 1); // マルチタッチ（移動＋照準＋ボタン）
+    // マルチタッチ（移動＋照準＋ボタン）。addPointer はグローバルな InputManager に積まれ
+    // シーン終了で戻らないため、必要数に足りないときだけ足す（再入場のたびに増やさない）
+    if (this.input.manager.pointersTotal < BALANCE.TOUCH.MAX_POINTERS) {
+      this.input.addPointer(BALANCE.TOUCH.MAX_POINTERS - this.input.manager.pointersTotal);
+    }
     BGM.play("game"); // AudioContext 未初期化なら無音（後述の unlock 時に鳴り始める）
     this.explosionsFx = [];
     this.particles = [];
@@ -224,15 +236,26 @@ export class GameScene extends Phaser.Scene {
       k: kb.addKey(Phaser.Input.Keyboard.KeyCodes.K),
       l: kb.addKey(Phaser.Input.Keyboard.KeyCodes.L),
     };
+    // キーの「1押下1回」を保証するヘルパ。
+    // Phaser は Key 登録していないキーのオートリピートを抑制しないため、
+    // 押しっぱなしで地雷が連続設置される／ポーズが高速トグルする等が起きる。
+    // ネイティブの KeyboardEvent.repeat を見て弾く。
+    const onKeyPress = (name: string, fn: (event: KeyboardEvent) => void): void => {
+      kb.on(`keydown-${name}`, (event: KeyboardEvent) => {
+        if (event.repeat) return;
+        fn(event);
+      });
+    };
+
     // ポーズ切り替え（Esc / P）：プレイ中のみ有効
     const togglePause = (): void => {
       if (this.world.status === "playing") this.paused = !this.paused;
     };
-    kb.on("keydown-ESC", togglePause);
-    kb.on("keydown-P", togglePause);
+    onKeyPress("ESC", togglePause);
+    onKeyPress("P", togglePause);
     // R：全クリア画面ではタイトルへ、それ以外はゲーム全体をリスタート（M1・残機3）。
     // テストプレイ中はクリア/ゲームオーバーからエディタへ戻る（GDD §12.7）
-    kb.on("keydown-R", () => {
+    onKeyPress("R", () => {
       SFX.unlock();
       if (this.customPlay && (this.world.status === "allclear" || this.world.status === "gameover")) {
         this.scene.start("EditorScene");
@@ -248,31 +271,31 @@ export class GameScene extends Phaser.Scene {
       this.clearFx = null;
     });
     // スペース：1P 地雷設置（1押下1設置）
-    kb.on("keydown-SPACE", () => {
+    onKeyPress("SPACE", () => {
       SFX.unlock();
       this.mineRequested = true;
     });
     // Enter：2P 射撃（1押下1発。2人プレイ時のみ）
-    kb.on("keydown-ENTER", () => {
+    onKeyPress("ENTER", () => {
       if (this.playerCount !== 2) return;
       SFX.unlock();
       this.fire2Requested = true;
     });
     // 右Shift：2P 地雷設置（location===2 が右側の Shift。2人プレイ時のみ）
-    kb.on("keydown-SHIFT", (event: KeyboardEvent) => {
+    onKeyPress("SHIFT", (event: KeyboardEvent) => {
       if (this.playerCount !== 2 || event.location !== 2) return;
       SFX.unlock();
       this.mine2Requested = true;
     });
     // M：効果音とBGMのミュート切替（共通。GDD §9 v0.11）
-    kb.on("keydown-M", () => {
+    onKeyPress("M", () => {
       SFX.unlock();
       const muted = SFX.toggleMute();
       BGM.setMuted(muted);
       if (!muted) BGM.play("game");
     });
     // B：BGM だけのミュート切替（GDD §9 v0.11）
-    kb.on("keydown-B", () => {
+    onKeyPress("B", () => {
       SFX.unlock();
       if (!BGM.toggleMute()) BGM.play("game");
     });
@@ -409,7 +432,7 @@ export class GameScene extends Phaser.Scene {
         moveY: touch && (touch.moveX !== 0 || touch.moveY !== 0) ? touch.moveY : keyY,
         aim: touch?.aim
           ? { mode: "cursor", x: touch.aim.x, y: touch.aim.y }
-          : { mode: "cursor", x: pointer.worldX, y: pointer.worldY },
+          : { mode: "cursor", x: pointer.x, y: pointer.y }, // 揺れの影響を受けない画面座標
         fire: this.fireRequested || this.fireBuffer1 > 0 || (touch?.fire ?? false), // 先行入力バッファ（GDD §3 v0.10）
         placeMine: this.mineRequested || (touch?.minePressed ?? false),
       };
@@ -494,6 +517,8 @@ export class GameScene extends Phaser.Scene {
     if (idx === null || time === null) return;
     // テストプレイはベスト記録の対象外（GDD §12.7）
     const newRecord = this.customPlay ? false : this.records.submitMissionTime(idx + 1, time);
+    // 到達記録の更新（次のミッションから「続きから」始められるようにする。GDD §8.6）
+    if (!this.customPlay) this.records.submitReached(idx + 2);
     if (newRecord) this.newRecordMissions.add(idx + 1);
     if (isAllClear) {
       this.buildAllClearText();
@@ -728,8 +753,9 @@ export class GameScene extends Phaser.Scene {
     // HUD（ミッション番号・難易度・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§8.3・§12.5）
     let left = `MISSION ${world.missionIndex + 1}/${world.missions.length}　[${DIFFICULTY_LABELS[this.difficulty]}]　残機: ${world.lives}`;
     if (this.playerCount === 2) {
-      const stateOf = (i: number): string => (world.players[i]?.alive ? "生存" : "退場");
-      left += `　P1: ${stateOf(0)}　P2: ${stateOf(1)}`;
+      // 中央のタイム表示と重ならないよう短い記号で示す（◆=生存 ✕=退場）
+      const stateOf = (i: number): string => (world.players[i]?.alive ? "◆" : "✕");
+      left += `　P1${stateOf(0)} P2${stateOf(1)}`;
     }
     this.hudLeft.setText(left);
     this.hudRight.setText(`撃破: ${world.kills}　敵: ${world.enemiesLeft()}${SFX.muted ? "　[消音]" : ""}`);
@@ -797,8 +823,8 @@ export class GameScene extends Phaser.Scene {
     // 十字カーソル（照準位置。タッチ中はタッチ点、それ以外はマウス。オーバーレイより前面）
     const gfx = this.crosshairGfx;
     const aim = this.lastTouch?.aim;
-    const x = aim ? aim.x : pointer.worldX;
-    const y = aim ? aim.y : pointer.worldY;
+    const x = aim ? aim.x : pointer.x;
+    const y = aim ? aim.y : pointer.y;
     gfx.clear();
     gfx.lineStyle(1.5, COLORS.CROSSHAIR, 1);
     gfx.beginPath();
