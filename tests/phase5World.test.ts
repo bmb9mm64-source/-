@@ -51,7 +51,7 @@ describe("world 統合：敵E/F の生成・撃破・クリア（GDD §6 v0.9）
     skipBanner(world);
     expect(world.enemies.map((e) => e.kind).sort()).toEqual(["chaser", "reflector"]);
     expect(world.enemiesLeft()).toBe(2); // 敵残数に含まれる
-    for (const e of world.enemies) world.bullets.push(makeBullet({ x: e.x, y: e.y }));
+    for (const e of world.enemies) world.bullets.push(makeBullet({ x: e.x, y: e.y, ownerIsPlayer: true }));
     world.update(0.016, [idleInput()]);
     expect(world.status).toBe("allclear"); // 撃破がクリア判定に数えられる
     expect(world.kills).toBe(2); // 撃破数に計上される

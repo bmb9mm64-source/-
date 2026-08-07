@@ -131,23 +131,26 @@ export function updateMines(
   stage: ParsedStage,
   cfg: MineConfig = BALANCE.MINE,
 ): MineUpdateResult {
-  const toExplode: Mine[] = [];
+  // 爆発の待ち行列。byPlayer＝「プレイヤーが起こした爆発か」（GDD §5.2 v0.12）。
+  // プレイヤー所有の地雷、またはプレイヤーが誘爆させた敵地雷のみ、爆風が敵戦車を破壊する。
+  const toExplode: { mine: Mine; byPlayer: boolean }[] = [];
 
   // --- 起爆判定（自動起爆・接近起爆・弾の接触） ---
   for (const m of mines) {
     if (m.dead) continue;
 
-    // 設置後 10 秒で自動起爆
+    // 設置後 10 秒で自動起爆（時限起爆は設置者の陣営が原因＝敵地雷なら敵に効かない）
     m.fuse -= dt;
     if (m.fuse <= 0) {
       m.dead = true;
-      toExplode.push(m);
+      toExplode.push({ mine: m, byPlayer: m.ownerIsPlayer });
       continue;
     }
 
     // 接近起爆（v0.6.1）：敵対側の戦車のみ反応（＋一度離れた設置者の再接近）。
     // 同陣営（敵の地雷×別の敵）では起爆しない。kind 未指定の対象は敵対扱い（旧挙動互換）。
     let triggered = false;
+    let byPlayer = m.ownerIsPlayer; // 自分がプレイヤーの地雷なら常にプレイヤー起因
     for (const t of tanks) {
       if (!t.alive) continue;
       const dx = t.x - m.x;
@@ -158,11 +161,14 @@ export function updateMines(
         else if (m.ownerClear) triggered = true; // 一度離れた設置者が戻ってきた
       } else if (inRange) {
         const hostile = t.kind === undefined || (t.kind === "player") !== m.ownerIsPlayer;
-        if (hostile) triggered = true;
+        if (hostile) {
+          triggered = true;
+          if (t.kind === "player") byPlayer = true; // プレイヤーが踏んで起爆させた
+        }
       }
     }
 
-    // 弾が触れて誘爆
+    // 弾が触れて誘爆（プレイヤーの弾で起爆させたなら敵も巻き込める）
     if (!triggered) {
       for (const b of bullets) {
         if (b.dead) continue;
@@ -171,6 +177,7 @@ export function updateMines(
         const rr = cfg.RADIUS + b.radius;
         if (dx * dx + dy * dy < rr * rr) {
           triggered = true;
+          if (b.ownerIsPlayer) byPlayer = true;
           break;
         }
       }
@@ -178,20 +185,22 @@ export function updateMines(
 
     if (triggered) {
       m.dead = true;
-      toExplode.push(m);
+      toExplode.push({ mine: m, byPlayer });
     }
   }
 
   // --- 爆発の解決（誘爆の連鎖は同フレーム内でキューを回して処理） ---
   const result: MineUpdateResult = { explosions: [], wallsDestroyed: 0 };
   while (toExplode.length > 0) {
-    const m = toExplode.pop()!;
+    const { mine: m, byPlayer } = toExplode.pop()!;
     result.explosions.push({ x: m.x, y: m.y });
     const blast = cfg.BLAST_RADIUS;
 
-    // 範囲内の全戦車を撃破（敵味方を問わない＝自爆あり）
+    // 範囲内の戦車を撃破。プレイヤーには常に当たる（自爆・味方誤爆あり）が、
+    // 敵戦車を破壊できるのはプレイヤーが起こした爆発のみ（GDD §5.2 v0.12）
     for (const t of tanks) {
       if (!t.alive) continue;
+      if (t.kind !== undefined && t.kind !== "player" && !byPlayer) continue; // 敵の自滅・同士討ちを禁止
       const dx = t.x - m.x;
       const dy = t.y - m.y;
       const rr = blast + t.radius;
@@ -210,7 +219,7 @@ export function updateMines(
     // 破壊可能壁 X を消滅させる（タイルを床に変える）
     result.wallsDestroyed += destroyXTiles(stage, m.x, m.y, blast);
 
-    // 範囲内の他の地雷を誘爆させる（連鎖）
+    // 範囲内の他の地雷を誘爆させる（連鎖）。起因（プレイヤーか否か）は連鎖先へ引き継ぐ
     for (const other of mines) {
       if (other.dead) continue;
       const dx = other.x - m.x;
@@ -218,7 +227,7 @@ export function updateMines(
       const rr = blast + cfg.RADIUS;
       if (dx * dx + dy * dy < rr * rr) {
         other.dead = true;
-        toExplode.push(other);
+        toExplode.push({ mine: other, byPlayer: byPlayer || other.ownerIsPlayer });
       }
     }
   }

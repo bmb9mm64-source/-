@@ -118,7 +118,7 @@ export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext
         Math.abs(angleDiff(aimTarget, e.turretAngle)) < c.FIRE_ANGLE_TOL && // 砲塔がほぼ狙い通り
         (direct || shot !== null); // 直接射線 or 跳弾射線のどちらかが成立
       if (ready) {
-        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult));
+        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
         e.fireTimer = sentryNextInterval(ctx.rng, mods.fireIntervalMult);
         e.state = "RELOAD";
         e.ricochetRolled = false; // 次の AIM サイクルで再抽選

@@ -13,8 +13,22 @@ export interface Bullet {
   radius: number;
   bounces: number; // これまでの反射回数
   maxBounces?: number; // この弾固有の反射上限（未設定＝BALANCE.BULLET.MAX_BOUNCES。敵E弾は2。GDD §6 v0.9）
-  owner: object; // 同時発射数のカウント用（弾自体は発射者を問わず全戦車に当たる）
+  owner: object; // 同時発射数のカウント用
+  ownerIsPlayer: boolean; // 発射者がプレイヤー側か（v0.12：敵弾は敵に当たらない。GDD §5.2）
+  armed: boolean; // 発射者から一度離れたか（GDD §5.3 v0.12：離れるまで発射者には当たらない）
   dead: boolean;
+}
+
+/** 弾が発射者から離れたら「発射者にも当たる」状態にする（GDD §5.3 v0.12） */
+export function updateBulletArming(b: Bullet): void {
+  if (b.armed) return;
+  const o = b.owner as { x?: number; y?: number; radius?: number };
+  if (typeof o.x !== "number" || typeof o.y !== "number") {
+    b.armed = true; // 発射者の位置が不明なら従来どおり即座に有効
+    return;
+  }
+  const clear = (o.radius ?? BALANCE.PLAYER.RADIUS) + b.radius;
+  if (Math.hypot(b.x - o.x, b.y - o.y) > clear) b.armed = true;
 }
 
 /** 弾生成の調整値 */
@@ -25,21 +39,52 @@ export interface BulletSpawnConfig {
   MAX_BOUNCES?: number; // 弾固有の反射上限（省略時は共通の BALANCE.BULLET.MAX_BOUNCES）
 }
 
-/** 弾の生成。owner の砲口位置から angle 方向へ発射し、bullets に追加する */
+/**
+ * 砲口位置を壁に入らない範囲へ補正する（GDD §5.3 v0.12）。
+ * 砲口オフセット（22px）は車体半辺（14px）より外側にあるため、壁に密着して壁の方向へ撃つと
+ * 弾が壁タイルの内部に生成され、押し戻しで自機に即命中する／壁をすり抜ける／横へ瞬間移動する。
+ * 発射者中心から砲口へ向かって、壁に入らない最も遠い距離を探して返す。
+ */
+function safeMuzzleOffset(
+  stage: ParsedStage,
+  ox: number,
+  oy: number,
+  cos: number,
+  sin: number,
+  cfg: BulletSpawnConfig,
+): number {
+  const step = 2; // 探索の刻み [px]（細かすぎると無駄・粗すぎると壁際で弾が出ない）
+  for (let d = cfg.MUZZLE_OFFSET; d > 0; d -= step) {
+    if (!circleHitsWall(stage, ox + cos * d, oy + sin * d, cfg.RADIUS)) return d;
+  }
+  return 0; // 中心まで戻す（戦車の中心が壁に入ることはないため必ず安全）
+}
+
+/**
+ * 弾の生成。owner の砲口位置から angle 方向へ発射し、bullets に追加する。
+ * stage を渡すと砲口位置を壁に入らないよう補正する（GDD §5.3）。
+ */
 export function spawnBullet(
   bullets: Bullet[],
-  owner: { x: number; y: number },
+  owner: { x: number; y: number; kind?: string },
   angle: number,
   cfg: BulletSpawnConfig = BALANCE.BULLET,
+  stage?: ParsedStage,
 ): Bullet {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const offset = stage ? safeMuzzleOffset(stage, owner.x, owner.y, cos, sin, cfg) : cfg.MUZZLE_OFFSET;
   const b: Bullet = {
-    x: owner.x + Math.cos(angle) * cfg.MUZZLE_OFFSET,
-    y: owner.y + Math.sin(angle) * cfg.MUZZLE_OFFSET,
-    vx: Math.cos(angle) * cfg.SPEED,
-    vy: Math.sin(angle) * cfg.SPEED,
+    x: owner.x + cos * offset,
+    y: owner.y + sin * offset,
+    vx: cos * cfg.SPEED,
+    vy: sin * cfg.SPEED,
     radius: cfg.RADIUS,
     bounces: 0,
     owner,
+    ownerIsPlayer: owner.kind === "player", // GDD §5.2：敵弾は敵に当たらない
+    // 砲口が壁補正で発射者の内側に寄った場合に備え、発射者から離れるまでは発射者に当てない
+    armed: false,
     dead: false,
   };
   if (cfg.MAX_BOUNCES !== undefined) b.maxBounces = cfg.MAX_BOUNCES; // 弾固有の反射上限（敵E弾）
@@ -145,8 +190,11 @@ export function updateBullet(
   let bounced = false;
 
   // --- X軸移動 ---
+  // 速度が実質ゼロの軸は処理しない（真上・真下撃ちで cos が 1e-17 になり、
+  // 押し戻し方向が浮動小数の符号で決まって横へ瞬間移動する不具合を防ぐ。GDD §5.3 v0.12）
+  const EPS_V = 1e-6;
   b.x += b.vx * dt;
-  let hit = circleHitsWall(stage, b.x, b.y, b.radius);
+  let hit = Math.abs(b.vx) > EPS_V ? circleHitsWall(stage, b.x, b.y, b.radius) : null;
   if (hit) {
     if (!reflectsBullet(hit.ch)) {
       b.dead = true; // 破壊可能壁：反射せず消滅
@@ -160,7 +208,7 @@ export function updateBullet(
 
   // --- Y軸移動 ---
   b.y += b.vy * dt;
-  hit = circleHitsWall(stage, b.x, b.y, b.radius);
+  hit = Math.abs(b.vy) > EPS_V ? circleHitsWall(stage, b.x, b.y, b.radius) : null;
   if (hit) {
     if (!reflectsBullet(hit.ch)) {
       b.dead = true;

@@ -115,7 +115,7 @@ export function updateReflector(e: ReflectorTank, dt: number, ctx: ReflectorUpda
         (direct || shot !== null); // 直接射線 or 跳弾射線のどちらかが成立
       if (ready) {
         // 300px/s・反射上限2回 ×難易度弾速倍率
-        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(REFLECTOR_BULLET_CFG, mods.bulletSpeedMult));
+        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(REFLECTOR_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
         e.fireTimer = reflectorNextInterval(ctx.rng, mods.fireIntervalMult);
         e.state = "RELOAD";
       }

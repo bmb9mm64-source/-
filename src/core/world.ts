@@ -21,7 +21,13 @@
  *   プレイヤー性能・ステージ地形・敵配置は難易度で変えない。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, bulletHitsTank, resolveBulletVsBullet, updateBullet } from "./bullet";
+import {
+  type Bullet,
+  bulletHitsTank,
+  resolveBulletVsBullet,
+  updateBullet,
+  updateBulletArming,
+} from "./bullet";
 import { createChaser, type ChaserTank, updateChaser } from "./chaser";
 import { type Difficulty, type DifficultyMods, resolveDifficulty } from "./difficulty";
 import { tryFire } from "./firing";
@@ -274,6 +280,7 @@ export class GameWorld {
         const fired = tryFire(p, this.bullets, p.turretAngle, {
           fireInterval: BALANCE.PLAYER.FIRE_INTERVAL,
           maxBullets: BALANCE.PLAYER.MAX_BULLETS,
+          stage: this.stage, // 砲口が壁に入らないよう補正（GDD §5.3 v0.12）
         });
         if (fired) this.events.push("fire");
       }
@@ -379,6 +386,7 @@ export class GameWorld {
       if (b.dead) continue;
       const prevBounces = b.bounces;
       updateBullet(b, dt, this.stage);
+      updateBulletArming(b); // 発射者から離れたら発射者にも当たるようにする（GDD §5.3 v0.12）
       if (b.bounces > prevBounces) this.events.push("bounce");
     }
 
@@ -406,11 +414,14 @@ export class GameWorld {
     if (mineResult.wallsDestroyed > 0) this.stageVersion++; // 盤面が変わった（描画更新用）
     this.mines = this.mines.filter((m) => !m.dead);
 
-    // --- 弾 vs 戦車（弾は発射者を問わず全戦車に当たる＝フレンドリーファイアあり。GDD §5・§12.5） ---
+    // --- 弾 vs 戦車 ---
+    // プレイヤー弾は全戦車に当たる（自分の跳ね返り弾での自爆・2P へのフレンドリーファイアは維持）。
+    // 敵弾はプレイヤーにのみ当たる（敵の自弾自爆・同士討ちを禁止。GDD §5.2 v0.12）
     for (const b of this.bullets) {
       if (b.dead) continue;
       let consumed = false;
       for (const p of this.players) {
+        if (p === b.owner && !b.armed) continue; // 発射直後の自弾は発射者に当たらない（GDD §5.3）
         if (p.alive && bulletHitsTank(b, p)) {
           b.dead = true;
           p.alive = false; // 被弾したプレイヤーはそのミッション中退場
@@ -419,7 +430,9 @@ export class GameWorld {
         }
       }
       if (consumed) continue;
+      if (!b.ownerIsPlayer) continue; // 敵弾は敵に当たらない（GDD §5.2）
       for (const e of this.enemies) {
+        if (e === b.owner && !b.armed) continue; // 同上（発射直後の自弾）
         if (e.alive && bulletHitsTank(b, e)) {
           b.dead = true;
           e.alive = false; // 耐久1：即撃破

@@ -218,7 +218,7 @@ export function updateChaser(e: ChaserTank, dt: number, ctx: ChaserUpdateContext
     pick.hasLos && // 標的への射線が通っている（全員遮蔽なら照準追従のみ。GDD §12.5）
     Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL; // 砲塔がほぼ狙い通り
   if (ready) {
-    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult));
+    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
     e.fireTimer = chaserNextInterval(ctx.rng, mods.fireIntervalMult);
   }
 }

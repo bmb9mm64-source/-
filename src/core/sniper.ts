@@ -112,7 +112,7 @@ export function updateSniper(e: SniperTank, dt: number, ctx: SniperUpdateContext
         (direct || shot !== null); // 直接射線 or 跳弾射線のどちらかが成立
       if (ready) {
         // 340px/s ×難易度弾速倍率（「スナイパー弾にも適用」GDD §8.3）
-        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(SNIPER_BULLET_CFG, mods.bulletSpeedMult));
+        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(SNIPER_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
         e.fireTimer = sniperNextInterval(ctx.rng, mods.fireIntervalMult);
         e.state = "RELOAD";
         e.ricochetRolled = false; // 次の AIM サイクルで再抽選

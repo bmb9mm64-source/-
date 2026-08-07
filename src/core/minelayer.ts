@@ -172,7 +172,7 @@ export function updateMinelayer(e: MinelayerTank, dt: number, ctx: MinelayerUpda
     Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL; // 砲塔がほぼ狙い通り
   if (ready) {
     // 225px/s ×難易度弾速倍率（GDD §6 v0.6・§8.3）
-    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult));
+    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
     e.fireTimer = minelayerNextFireInterval(ctx.rng, mods.fireIntervalMult);
   }
 }

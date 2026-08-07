@@ -19,6 +19,8 @@ export function makeBullet(partial: Partial<Bullet>): Bullet {
     radius: 4,
     bounces: 0,
     owner: {},
+    ownerIsPlayer: false,
+    armed: true,
     dead: false,
     ...partial,
   };

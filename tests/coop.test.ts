@@ -113,7 +113,7 @@ describe("ローカル2P協力（GameWorld）", () => {
     const world = makeCoopWorld();
     world.players[1]!.alive = false; // 2P は退場中
     for (const e of world.enemies) {
-      world.bullets.push(makeBullet({ x: e.x, y: e.y }));
+      world.bullets.push(makeBullet({ x: e.x, y: e.y, ownerIsPlayer: true }));
     }
     world.update(0.016, [idleInput(), idleInput()]);
     expect(world.events).toContain("missionClear");

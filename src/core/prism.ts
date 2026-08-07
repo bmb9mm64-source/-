@@ -108,7 +108,7 @@ export function updatePrism(e: PrismTank, dt: number, ctx: PrismUpdateContext): 
         (direct || shot !== null); // 直接射線 or 跳弾射線のどちらかが成立
       if (ready) {
         // 280px/s・反射上限3回 ×難易度弾速倍率
-        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(PRISM_BULLET_CFG, mods.bulletSpeedMult));
+        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(PRISM_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
         e.fireTimer = prismNextInterval(ctx.rng, mods.fireIntervalMult);
         e.state = "RELOAD";
       }

@@ -39,7 +39,7 @@ function skipBanner(world: GameWorld): void {
 /** 現ミッションの敵を弾で全滅させる（敵位置に弾を置いて1フレーム＝dt 回す） */
 function killAllEnemies(world: GameWorld, dt = 0.016): void {
   for (const e of world.enemies) {
-    if (e.alive) world.bullets.push(makeBullet({ x: e.x, y: e.y }));
+    if (e.alive) world.bullets.push(makeBullet({ x: e.x, y: e.y, ownerIsPlayer: true }));
   }
   world.update(dt, [idleInput()]);
 }
