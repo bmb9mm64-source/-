@@ -325,6 +325,19 @@ export const BALANCE = {
     SHAKE_MINE_DURATION: 0.2, // 地雷爆発時の画面揺れ時間 [s]（一回り大きい。GDD §8.5）
     SHAKE_MINE_INTENSITY: 0.006, // 地雷爆発時の揺れ強さ
     CLEAR_BANNER_TIME: 1.0, // 「CLEAR!」表示時間 [s]（GAME.BANNER_TIME より短くし、残りで次ミッションバナーを見せる）
+    // 弾のミサイル描画（GDD §5「弾の見た目」v0.16。すべて当たり判定半径 BULLET.RADIUS の倍率で、
+    // 前方（+）は 1.0 まで＝弾頭の先端が当たり判定の円の縁に一致する。胴体・尾翼・炎は後方だけに伸ばす）
+    MISSILE_NOSE: 1.0, // 弾頭の先端（進行方向）
+    MISSILE_BODY_FRONT: 0.35, // 胴体の前端（ここから先端までが円錐状の弾頭）
+    MISSILE_BODY_BACK: -1.5, // 胴体の後端
+    MISSILE_HALF_WIDTH: 0.62, // 胴体の半幅
+    MISSILE_FIN_BACK: -2.1, // 尾翼の後端
+    MISSILE_FIN_HALF_WIDTH: 1.35, // 尾翼の半幅（張り出し）
+    MISSILE_FLAME_MIN: -2.2, // 噴射炎の後端（最短）
+    MISSILE_FLAME_MAX: -3.4, // 噴射炎の後端（最長）
+    MISSILE_FLAME_HALF_WIDTH: 0.45, // 噴射炎の付け根の半幅
+    MISSILE_FLAME_HZ: 14, // 噴射炎の明滅周波数 [Hz]
+    MISSILE_FLAME_ALPHA: 0.85, // 噴射炎の不透明度
   },
 
   LOS_STEP: 6, // 射線判定（レイキャスト）のサンプリング間隔 [px]
@@ -376,6 +389,9 @@ export const COLORS = {
   MORTAR_TRACK: 0x3c4f24,
   MORTAR_TURRET: 0xc3e08a,
   SHELL: 0xffd08a, // 榴弾（通常弾と区別できる暖色）
+  SHELL_EDGE: 0x9c7134, // 榴弾の輪郭
+  MISSILE_FLAME: 0xffb347, // 噴射炎（外側の橙）
+  MISSILE_FLAME_CORE: 0xfff0c2, // 噴射炎の芯（明るい黄白）
   PRISM_BODY: 0xd44fb0, // 敵G「プリズム」はマゼンタ（赤紫）系のオリジナル配色（GDD §6 v0.10）
   PRISM_TRACK: 0x8f2f77,
   PRISM_TURRET: 0xffb3e6,
