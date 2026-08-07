@@ -114,9 +114,9 @@ describe("セントリーの跳弾狙撃（統合）", () => {
   const player = { x: 7.5 * T, y: 5 * T };
   const pos = { x: 2.5 * T, y: 5 * T };
 
-  it("直接射線が塞がれていても、抽選成立（rng<20%）なら外周反射で撃つ。敵弾速は225px/s", () => {
+  it("直接射線が塞がれていても、抽選成立（rng<難易度確率）なら外周反射で撃つ。敵弾速は225px/s", () => {
     const stage = makeStage(BLOCKED_MID_10X8);
-    const rng = () => 0.1; // 抽選 0.1 < 0.2 → 跳弾狙撃モード
+    const rng = () => 0.1; // 抽選 0.1 < 0.75（NORMAL の跳弾狙撃確率。GDD §6 v0.9）→ 跳弾狙撃モード
     const s = readySentry(pos.x, pos.y, rng);
     const bullets: Bullet[] = [];
     runFrames(s, bullets, stage, player, rng, 5);
@@ -126,9 +126,9 @@ describe("セントリーの跳弾狙撃（統合）", () => {
     expect(b.vy).toBeLessThan(0); // 上の外周壁を狙って撃っている（上向き）
   });
 
-  it("抽選に外れ続ける（rng>20%）と、直接射線が塞がれている間は一切撃たない", () => {
+  it("抽選に外れ続ける（rng≥難易度確率）と、直接射線が塞がれている間は一切撃たない", () => {
     const stage = makeStage(BLOCKED_MID_10X8);
-    const rng = () => 0.9; // 抽選 0.9 >= 0.2 → 通常照準のまま
+    const rng = () => 0.9; // 抽選 0.9 >= 0.75（NORMAL）→ 通常照準のまま
     const s = readySentry(pos.x, pos.y, rng);
     const bullets: Bullet[] = [];
     runFrames(s, bullets, stage, player, rng, 5);

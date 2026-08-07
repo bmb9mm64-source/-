@@ -7,13 +7,14 @@
  *   P プレイヤー初期位置（床扱い）   A 敵A「セントリー」（床扱い）
  *   B 敵B「ローバー」（床扱い）      C 敵C「スナイパー」（床扱い）
  *   D 敵D「マインレイヤー」（床扱い）
+ *   E 敵E「リフレクター」（床扱い）  F 敵F「チェイサー」（床扱い）（GDD §7 v0.9）
  */
 import { BALANCE } from "../config/balance";
 import type { Vec2 } from "./types";
 
 /** 解析済みステージ */
 export interface ParsedStage {
-  grid: string[][]; // grid[row][col] のタイル文字（P/A/B/C/D は '.' に置換済み）
+  grid: string[][]; // grid[row][col] のタイル文字（P/A/B/C/D/E/F は '.' に置換済み）
   cols: number;
   rows: number;
   tile: number; // 1タイルの辺長 [px]
@@ -22,6 +23,8 @@ export interface ParsedStage {
   roverSpawns: Vec2[]; // 敵B「ローバー」の初期位置
   sniperSpawns: Vec2[]; // 敵C「スナイパー」の初期位置（GDD §7 v0.6）
   minelayerSpawns: Vec2[]; // 敵D「マインレイヤー」の初期位置（GDD §7 v0.6）
+  reflectorSpawns: Vec2[]; // 敵E「リフレクター」の初期位置（GDD §7 v0.9）
+  chaserSpawns: Vec2[]; // 敵F「チェイサー」の初期位置（GDD §7 v0.9）
 }
 
 /** パーサのオプション（省略時は GDD §7 の正規サイズ。テストでは小さい盤面を渡せる） */
@@ -46,6 +49,8 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
   const roverSpawns: Vec2[] = [];
   const sniperSpawns: Vec2[] = [];
   const minelayerSpawns: Vec2[] = [];
+  const reflectorSpawns: Vec2[] = [];
+  const chaserSpawns: Vec2[] = [];
 
   for (let r = 0; r < lines.length; r++) {
     const rowStr = lines[r]!;
@@ -72,6 +77,12 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
       } else if (ch === "D") {
         minelayerSpawns.push({ x: cx, y: cy });
         ch = ".";
+      } else if (ch === "E") {
+        reflectorSpawns.push({ x: cx, y: cy });
+        ch = ".";
+      } else if (ch === "F") {
+        chaserSpawns.push({ x: cx, y: cy });
+        ch = ".";
       }
       line.push(ch);
     }
@@ -88,6 +99,8 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
     roverSpawns,
     sniperSpawns,
     minelayerSpawns,
+    reflectorSpawns,
+    chaserSpawns,
   };
 }
 

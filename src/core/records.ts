@@ -4,10 +4,13 @@
  * - localStorage（ブラウザ内保存。サーバ送信なし）への依存は注入式：
  *   Storage 互換の get/set を持つ薄い抽象 RecordStore を受け取り、core を純粋に保つ。
  *   テストではメモリ実装（memoryStore）、実行時は safeLocalStorageStore を使う。
- * - 保存キー：`hanedan.best.mission.<n>`（n はミッション番号。1始まり）と `hanedan.best.total`。
+ * - ベスト記録は難易度別（GDD §8.3 v0.9）。保存キー：
+ *   `hanedan.best.<難易度>.mission.<n>`（n はミッション番号。1始まり）と `hanedan.best.<難易度>.total`。
+ *   旧キー（難易度なし）の記録は移行せず参照しない。
  * - 壊れた保存値（NaN・負数・非数値文字列・空文字）は「記録なし」として無視し、上書き可能にする。
  * - タイムは秒単位の数値を文字列で保存する（表示丸めはせず全精度で比較する）。
  */
+import type { Difficulty } from "./difficulty";
 
 /** Storage 互換の薄い抽象（localStorage の getItem/setItem に対応） */
 export interface RecordStore {
@@ -15,12 +18,13 @@ export interface RecordStore {
   set(key: string, value: string): void;
 }
 
-/** 保存キー（GDD §8.5：`hanedan.best.*`） */
+/** 保存キー（GDD §8.3・§8.5：`hanedan.best.<難易度>.*`） */
 export const RECORD_KEYS = {
   /** ミッション別ベストタイム（missionNumber は1始まり） */
-  mission: (missionNumber: number): string => `hanedan.best.mission.${missionNumber}`,
+  mission: (difficulty: Difficulty, missionNumber: number): string =>
+    `hanedan.best.${difficulty}.mission.${missionNumber}`,
   /** 通しトータルタイムのベスト */
-  total: "hanedan.best.total",
+  total: (difficulty: Difficulty): string => `hanedan.best.${difficulty}.total`,
 } as const;
 
 /** メモリ実装（テスト・localStorage 不可時のフォールバック。保存はセッション限り） */
@@ -84,22 +88,24 @@ export function formatTime(seconds: number): string {
   return t.toFixed(1);
 }
 
-/** ベスト記録の読み書きと更新判定（GDD §8.5） */
+/** ベスト記録の読み書きと更新判定（GDD §8.5。難易度別に保存：GDD §8.3） */
 export class Records {
   private readonly store: RecordStore;
+  private readonly difficulty: Difficulty;
 
-  constructor(store: RecordStore) {
+  constructor(store: RecordStore, difficulty: Difficulty = "normal") {
     this.store = store;
+    this.difficulty = difficulty;
   }
 
   /** ミッション別ベストタイム [s]（missionNumber は1始まり。記録なし・壊れた値は null） */
   missionBest(missionNumber: number): number | null {
-    return parseStoredTime(this.store.get(RECORD_KEYS.mission(missionNumber)));
+    return parseStoredTime(this.store.get(RECORD_KEYS.mission(this.difficulty, missionNumber)));
   }
 
   /** 通しトータルタイムのベスト [s]（記録なし・壊れた値は null） */
   totalBest(): number | null {
-    return parseStoredTime(this.store.get(RECORD_KEYS.total));
+    return parseStoredTime(this.store.get(RECORD_KEYS.total(this.difficulty)));
   }
 
   /**
@@ -111,7 +117,7 @@ export class Records {
     if (!isValidTime(time)) return false;
     const best = this.missionBest(missionNumber);
     if (best !== null && time >= best) return false;
-    this.store.set(RECORD_KEYS.mission(missionNumber), String(time));
+    this.store.set(RECORD_KEYS.mission(this.difficulty, missionNumber), String(time));
     return true;
   }
 
@@ -120,7 +126,7 @@ export class Records {
     if (!isValidTime(time)) return false;
     const best = this.totalBest();
     if (best !== null && time >= best) return false;
-    this.store.set(RECORD_KEYS.total, String(time));
+    this.store.set(RECORD_KEYS.total(this.difficulty), String(time));
     return true;
   }
 }

@@ -1,14 +1,27 @@
 /**
- * タイトルシーン — タイトル・操作説明を表示し、「1人で出撃／2人で出撃」を選んでゲーム開始
- * （クリックまたは 1 / 2 キー。GDD §12.5）。
+ * タイトルシーン — タイトル・操作説明・難易度選択を表示し、「1人で出撃／2人で出撃」を選んでゲーム開始
+ * （クリックまたは 1 / 2 キー。GDD §8.3・§12.5）。
+ * 難易度は EASY / NORMAL / HARD のトグルボタン（選択は localStorage に保存し次回も維持。既定 NORMAL）。
  * 描画はすべてコード描画（外部アセット禁止・オリジナル配色）。
  */
 import Phaser from "phaser";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
-import { formatTime, Records, safeLocalStorageStore } from "../core/records";
+import {
+  DIFFICULTIES,
+  type Difficulty,
+  DIFFICULTY_LABELS,
+  loadDifficulty,
+  saveDifficulty,
+} from "../core/difficulty";
+import { formatTime, Records, type RecordStore, safeLocalStorageStore } from "../core/records";
 
 export class TitleScene extends Phaser.Scene {
+  private store: RecordStore = safeLocalStorageStore();
+  private difficulty: Difficulty = "normal";
+  private diffButtons = new Map<Difficulty, Phaser.GameObjects.Text>();
+  private bestText!: Phaser.GameObjects.Text;
+
   constructor() {
     super({ key: "TitleScene" });
   }
@@ -78,6 +91,40 @@ export class TitleScene extends Phaser.Scene {
       )
       .setOrigin(0.5);
 
+    // 難易度選択（EASY / NORMAL / HARD のトグル。選択は保存して次回も維持。GDD §8.3）
+    this.store = safeLocalStorageStore();
+    this.difficulty = loadDifficulty(this.store);
+    this.add
+      .text(w / 2 - 208, h / 2 + 100, "難易度:", { ...textStyle, fontSize: "15px" })
+      .setOrigin(0.5);
+    this.diffButtons.clear();
+    DIFFICULTIES.forEach((d, i) => {
+      const btn = this.add
+        .text(w / 2 - 110 + i * 110, h / 2 + 100, DIFFICULTY_LABELS[d], {
+          ...textStyle,
+          fontSize: "15px",
+          fontStyle: "bold",
+          padding: { x: 12, y: 5 },
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerdown", () => {
+          SFX.unlock();
+          this.selectDifficulty(d);
+        });
+      this.diffButtons.set(d, btn);
+    });
+
+    // 通しトータルベスト（選択中難易度のもの。記録があれば小さく表示。GDD §8.3・§8.5）
+    this.bestText = this.add
+      .text(w / 2, h - 22, "", {
+        fontFamily: "sans-serif",
+        fontSize: "13px",
+        color: COLORS.RECORD_CSS,
+      })
+      .setOrigin(0.5);
+    this.refreshDifficultyUi();
+
     // モード選択（クリックまたは 1 / 2 キー）
     const start = (playerCount: number): void => {
       SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）
@@ -133,17 +180,28 @@ export class TitleScene extends Phaser.Scene {
       yoyo: true,
       repeat: -1,
     });
+  }
 
-    // 通しトータルベスト（記録があれば小さく表示。localStorage 読み出し。GDD §8.5）
-    const totalBest = new Records(safeLocalStorageStore()).totalBest();
-    if (totalBest !== null) {
-      this.add
-        .text(w / 2, h - 22, `通しベスト: ${formatTime(totalBest)}s（全ミッション合計）`, {
-          fontFamily: "sans-serif",
-          fontSize: "13px",
-          color: COLORS.RECORD_CSS,
-        })
-        .setOrigin(0.5);
+  /** 難易度を選択し、保存して表示を更新する（GDD §8.3） */
+  private selectDifficulty(difficulty: Difficulty): void {
+    this.difficulty = difficulty;
+    saveDifficulty(this.store, difficulty);
+    this.refreshDifficultyUi();
+  }
+
+  /** 難易度トグルの強調表示と、選択中難易度の通しベスト表示を更新する */
+  private refreshDifficultyUi(): void {
+    for (const [d, btn] of this.diffButtons) {
+      const selected = d === this.difficulty;
+      btn.setBackgroundColor(selected ? "#4c6fd0" : "#2b3040");
+      btn.setColor(selected ? "#ffffff" : "#9aa3b5");
     }
+    // 通しトータルベストは難易度別（旧キー＝難易度なしは参照しない。GDD §8.3）
+    const totalBest = new Records(this.store, this.difficulty).totalBest();
+    this.bestText.setText(
+      totalBest !== null
+        ? `通しベスト（${DIFFICULTY_LABELS[this.difficulty]}）: ${formatTime(totalBest)}s（全ミッション合計）`
+        : "",
+    );
   }
 }

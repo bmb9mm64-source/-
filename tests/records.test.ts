@@ -4,7 +4,8 @@
  * - ベスト更新判定：初回→更新、速い→更新、遅い・同タイム→非更新
  * - 壊れた保存値（NaN・負数・非数値文字列・空文字）は「記録なし」として安全に上書き可能
  * - 通しトータルベストも同じ判定
- * - 保存キーは hanedan.best.mission.<n> / hanedan.best.total
+ * - 保存キーは難易度別：hanedan.best.<難易度>.mission.<n> / hanedan.best.<難易度>.total
+ *   （GDD §8.3 v0.9。Records の難易度は省略時 normal＝既存呼び出しの互換維持）
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -22,7 +23,7 @@ describe("ベスト記録（Records）", () => {
     expect(records.missionBest(1)).toBeNull(); // 記録なし
     expect(records.submitMissionTime(1, 12.5)).toBe(true);
     expect(records.missionBest(1)).toBe(12.5);
-    expect(store.get("hanedan.best.mission.1")).toBe("12.5"); // GDD §8.5 のキー
+    expect(store.get("hanedan.best.normal.mission.1")).toBe("12.5"); // GDD §8.3 の難易度別キー（既定 normal）
   });
 
   it("より速いタイムはベスト更新、遅いタイムは非更新で記録を保持する", () => {
@@ -58,7 +59,7 @@ describe("ベスト記録（Records）", () => {
     ["無限大", "Infinity"],
   ])("壊れた保存値（%s）は記録なし扱いになり、初回として上書きできる", (_label, broken) => {
     const store = memoryStore();
-    store.set(RECORD_KEYS.mission(1), broken);
+    store.set(RECORD_KEYS.mission("normal", 1), broken);
     const records = new Records(store);
     expect(records.missionBest(1)).toBeNull(); // 壊れた値は無視（安全に初期化）
     expect(records.submitMissionTime(1, 42.0)).toBe(true); // 初回扱いで更新
@@ -73,13 +74,13 @@ describe("ベスト記録（Records）", () => {
     expect(records.missionBest(1)).toBeNull();
   });
 
-  it("通しトータルベスト：初回→更新、速い→更新、遅い→非更新。キーは hanedan.best.total", () => {
+  it("通しトータルベスト：初回→更新、速い→更新、遅い→非更新。キーは hanedan.best.<難易度>.total", () => {
     const store = memoryStore();
     const records = new Records(store);
     expect(records.totalBest()).toBeNull();
     expect(records.submitTotalTime(300.5)).toBe(true); // 初回
-    expect(store.get(RECORD_KEYS.total)).toBe("300.5");
-    expect(store.get("hanedan.best.total")).toBe("300.5"); // GDD §8.5 のキー
+    expect(store.get(RECORD_KEYS.total("normal"))).toBe("300.5");
+    expect(store.get("hanedan.best.normal.total")).toBe("300.5"); // GDD §8.3 の難易度別キー
     expect(records.submitTotalTime(250.0)).toBe(true); // 速い
     expect(records.submitTotalTime(280.0)).toBe(false); // 遅い
     expect(records.totalBest()).toBe(250.0);
@@ -87,7 +88,7 @@ describe("ベスト記録（Records）", () => {
 
   it("トータルベストの壊れた保存値も安全に上書きできる", () => {
     const store = memoryStore();
-    store.set(RECORD_KEYS.total, "not-a-number");
+    store.set(RECORD_KEYS.total("normal"), "not-a-number");
     const records = new Records(store);
     expect(records.totalBest()).toBeNull();
     expect(records.submitTotalTime(99.9)).toBe(true);
@@ -105,6 +106,43 @@ describe("ベスト記録（Records）", () => {
     const records = new Records(brokenStore);
     expect(records.missionBest(1)).toBeNull();
     expect(records.submitMissionTime(1, 10)).toBe(true); // 更新判定は行われる（保存はストア次第）
+  });
+});
+
+describe("ベスト記録の難易度別化（GDD §8.3 v0.9）", () => {
+  it("難易度ごとにキーが分かれる：easy の記録は normal・hard に影響しない", () => {
+    const store = memoryStore();
+    const easy = new Records(store, "easy");
+    const normal = new Records(store, "normal");
+    const hard = new Records(store, "hard");
+    expect(easy.submitMissionTime(1, 10.0)).toBe(true);
+    expect(store.get("hanedan.best.easy.mission.1")).toBe("10");
+    expect(normal.missionBest(1)).toBeNull(); // easy の記録は normal に見えない
+    expect(hard.missionBest(1)).toBeNull();
+    // normal で遅いタイムを出しても easy とは独立に「初回更新」になる
+    expect(normal.submitMissionTime(1, 99.0)).toBe(true);
+    expect(easy.missionBest(1)).toBe(10.0); // easy 側は保持
+    expect(normal.missionBest(1)).toBe(99.0);
+  });
+
+  it("通しトータルベストも難易度ごとに独立する", () => {
+    const store = memoryStore();
+    const easy = new Records(store, "easy");
+    const hard = new Records(store, "hard");
+    expect(easy.submitTotalTime(200.0)).toBe(true);
+    expect(hard.totalBest()).toBeNull();
+    expect(hard.submitTotalTime(300.0)).toBe(true); // easy より遅くても hard では初回更新
+    expect(store.get(RECORD_KEYS.total("easy"))).toBe("200");
+    expect(store.get(RECORD_KEYS.total("hard"))).toBe("300");
+  });
+
+  it("旧キー（難易度なし）の記録は参照しない", () => {
+    const store = memoryStore();
+    store.set("hanedan.best.mission.1", "5"); // 旧形式の残骸
+    store.set("hanedan.best.total", "100");
+    const records = new Records(store, "normal");
+    expect(records.missionBest(1)).toBeNull(); // 移行せず無視（GDD §8.3）
+    expect(records.totalBest()).toBeNull();
   });
 });
 

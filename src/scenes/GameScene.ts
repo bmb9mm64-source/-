@@ -13,6 +13,7 @@
 import Phaser from "phaser";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
+import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
 import { eightWayAngle, type PlayerInput } from "../core/input";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
@@ -53,6 +54,7 @@ interface ClearFx {
 export class GameScene extends Phaser.Scene {
   private world!: GameWorld;
   private playerCount = 1; // TitleScene から渡されるモード（1 or 2）
+  private difficulty: Difficulty = "normal"; // 選択中の難易度（localStorage から復元。GDD §8.3）
   private customPlay = false; // エディタからのテストプレイ（記録対象外・終了後はエディタへ。GDD §12.7）
   private paused = false; // ポーズはシーン側の責務（ポーズ中は world.update を呼ばない）
   private fireRequested = false; // 1P：1クリック1発の発射要求フラグ
@@ -109,7 +111,9 @@ export class GameScene extends Phaser.Scene {
     const missions = this.customPlay
       ? [{ name: "カスタムステージ", grid: data.customStage! }]
       : ALL_MISSIONS;
-    this.world = new GameWorld(missions, Math.random, this.playerCount);
+    // 選択中の難易度でワールドを生成（エディタのテストプレイにも適用。GDD §8.3）
+    this.difficulty = loadDifficulty(safeLocalStorageStore());
+    this.world = new GameWorld(missions, Math.random, this.playerCount, this.difficulty);
     // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる（本編のみ）
     const mParam = Number(new URLSearchParams(window.location.search).get("m"));
     if (!this.customPlay && Number.isInteger(mParam) && mParam >= 1 && mParam <= ALL_MISSIONS.length) {
@@ -124,7 +128,7 @@ export class GameScene extends Phaser.Scene {
     this.explosionsFx = [];
     this.particles = [];
     this.lastStageVersion = -1;
-    this.records = new Records(safeLocalStorageStore());
+    this.records = new Records(safeLocalStorageStore(), this.difficulty); // ベスト記録は難易度別（GDD §8.3）
     this.newRecordMissions = new Set();
     this.clearFx = null;
     this.allClearText = "";
@@ -548,7 +552,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 戦車（セントリー＝橙／ローバー＝赤／スナイパー＝紫／マインレイヤー＝黄／1P＝青／2P＝緑。退場者は描かない）
+    // 戦車（セントリー＝橙／ローバー＝赤／スナイパー＝紫／マインレイヤー＝黄／
+    // リフレクター＝青緑／チェイサー＝白銀／1P＝青／2P＝緑。退場者は描かない）
     for (const e of world.enemies) {
       if (!e.alive) continue;
       switch (e.kind) {
@@ -563,6 +568,12 @@ export class GameScene extends Phaser.Scene {
           break;
         case "minelayer":
           this.drawTank(e, COLORS.MINELAYER_BODY, COLORS.MINELAYER_TRACK, COLORS.MINELAYER_TURRET);
+          break;
+        case "reflector": // 敵E：青緑（シアン）系（GDD §6 v0.9）
+          this.drawTank(e, COLORS.REFLECTOR_BODY, COLORS.REFLECTOR_TRACK, COLORS.REFLECTOR_TURRET);
+          break;
+        case "chaser": // 敵F：白銀系（GDD §6 v0.9）
+          this.drawTank(e, COLORS.CHASER_BODY, COLORS.CHASER_TRACK, COLORS.CHASER_TURRET);
           break;
       }
     }
@@ -598,8 +609,8 @@ export class GameScene extends Phaser.Scene {
       this.dynGfx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
 
-    // HUD（ミッション番号・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§12.5）
-    let left = `MISSION ${world.missionIndex + 1}/${world.missions.length}　残機: ${world.lives}`;
+    // HUD（ミッション番号・難易度・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§8.3・§12.5）
+    let left = `MISSION ${world.missionIndex + 1}/${world.missions.length}　[${DIFFICULTY_LABELS[this.difficulty]}]　残機: ${world.lives}`;
     if (this.playerCount === 2) {
       const stateOf = (i: number): string => (world.players[i]?.alive ? "生存" : "退場");
       left += `　P1: ${stateOf(0)}　P2: ${stateOf(1)}`;

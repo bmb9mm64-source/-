@@ -1,7 +1,7 @@
 /**
  * 調整値の一元管理（マジックナンバー禁止・CLAUDE.md 規約）。
- * 数値は GDD v0.4（docs/gdd.md）を正とする。GDD に明記のない細部
- * （ローバーの徘徊間隔・回避成功率、効果音の音量など）はここでの調整値とし、
+ * 数値は GDD v0.9（docs/gdd.md）を正とする。GDD に明記のない細部
+ * （ローバーの徘徊間隔、効果音の音量など）はここでの調整値とし、
  * プレイテストで更新する。単位：px＝ピクセル、s＝秒。角度はすべてラジアン。
  */
 export const BALANCE = {
@@ -32,6 +32,8 @@ export const BALANCE = {
     SPEED: 200, // プレイヤー弾の弾速 [px/s]（GDD §4。v0.4 で敵弾と分離）
     ENEMY_BULLET_SPEED: 225, // 敵弾（セントリー・ローバー・マインレイヤー）の弾速 [px/s]（GDD §6 v0.4：敵弾のみ強化）
     SNIPER_BULLET_SPEED: 340, // 敵C「スナイパー」弾の弾速 [px/s]（GDD §6 v0.6。反射上限は共通の1回）
+    REFLECTOR_BULLET_SPEED: 300, // 敵E「リフレクター」弾の弾速 [px/s]（GDD §6 v0.9）
+    REFLECTOR_MAX_BOUNCES: 2, // 敵E弾の反射上限（この敵の弾だけ2回跳ねる。GDD §6 v0.9）
     RADIUS: 4, // 弾の当たり判定半径 [px]
     MAX_BOUNCES: 1, // 反射上限（2回目の壁接触で消滅）
     MUZZLE_OFFSET: 22, // 砲口オフセット [px]（車体半径14+弾半径4 より外側 → 発射直後の自爆なし）
@@ -49,7 +51,7 @@ export const BALANCE = {
     FIRE_INTERVAL_VAR: 0.8, // 発射間隔のゆらぎ幅（±）[s]（v0.4：±1.0→±0.8）
     MAX_BULLETS: 1, // 同時発射数上限
     FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（GDD v0.2 §6。跳弾狙撃時は反射点方向に適用）
-    RICOCHET_AIM_CHANCE: 0.2, // 跳弾狙撃を試みる確率（リロード完了ごとに抽選。GDD §6 v0.4）
+    // 跳弾狙撃の確率は難易度で決まる（DIFFICULTY.*.TURRET_RICOCHET_CHANCE。GDD §6 v0.9 で個別値20%を廃止）
   },
 
   ROVER: {
@@ -69,7 +71,7 @@ export const BALANCE = {
     STUCK_TIME: 0.25, // 壁・戦車に行き詰まったと判断するまでの時間 [s]
     WANDER_PICK_TRIES: 20, // 徘徊目標（床タイル）の抽選試行回数
     DODGE_DETECT_RADIUS: 110, // プレイヤー弾の接近を検知する半径 [px]（v0.4：90→110）
-    DODGE_CHANCE: 0.5, // 回避を試みる確率（GDD §6 v0.4：35%→50% に強化）
+    // 回避の成功率は難易度で決まる（DIFFICULTY.*.ROVER_DODGE_CHANCE。GDD §8.3 v0.9）
     DODGE_TIME: 0.3, // 回避移動の継続時間 [s]（「短い回避移動」）
     DODGE_COOLDOWN: 0.8, // 回避判定のクールダウン [s]（毎フレーム抽選しない）
   },
@@ -83,7 +85,45 @@ export const BALANCE = {
     FIRE_INTERVAL_VAR: 1.0, // 発射間隔のゆらぎ幅（±）[s]
     MAX_BULLETS: 1, // 同時発射数上限
     FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
-    RICOCHET_AIM_CHANCE: 0.35, // 跳弾狙撃を試みる確率（セントリーの20%より高い。GDD §6 v0.6）
+    // 跳弾狙撃の確率は難易度で決まる（DIFFICULTY.*.TURRET_RICOCHET_CHANCE。GDD §6 v0.9 で個別値35%を廃止）
+  },
+
+  REFLECTOR: {
+    // 敵E「リフレクター」（反射砲台型。GDD §6 v0.9。固定砲台＝セントリー構造の再利用）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (100 * Math.PI) / 180, // 砲塔回転速度 100°/s
+    JITTER_MAX: (1 * Math.PI) / 180, // 照準の最大ブレ（±1°）
+    JITTER_INTERVAL_MIN: 0.4, // ブレ量を引き直す間隔（最小）[s]（セントリーと同じ調整値）
+    JITTER_INTERVAL_MAX: 1.2, // ブレ量を引き直す間隔（最大）[s]
+    FIRE_INTERVAL_MEAN: 2.5, // 発射間隔の平均 [s]（難易度倍率の対象）
+    FIRE_INTERVAL_VAR: 0.8, // 発射間隔のゆらぎ幅（±）[s]
+    MAX_BULLETS: 2, // 同時発射数上限（GDD §6 v0.9：同時2発）
+    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
+    // 跳弾狙撃は難易度によらず常時100%（GDD §6 v0.9）。直接射線があれば直接射撃を優先
+  },
+
+  CHASER: {
+    // 敵F「チェイサー」（追跡型。GDD §6 v0.9。移動・回避はローバーの WANDER 構造の流用）
+    SIZE: 28,
+    RADIUS: 14,
+    SPEED: 110, // 移動速度 [px/s]
+    TURN_SPEED: (200 * Math.PI) / 180, // 砲塔回転速度 200°/s
+    BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用）
+    FIRE_INTERVAL_MEAN: 1.0, // 発射間隔の平均 [s]（難易度倍率の対象）
+    FIRE_INTERVAL_VAR: 0.3, // 発射間隔のゆらぎ幅（±）[s]
+    MAX_BULLETS: 1, // 同時発射数上限
+    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
+    RETARGET_INTERVAL_MIN: 1.0, // 追跡目標を引き直す間隔（最小）[s]（GDD「1.0〜2.0s」）
+    RETARGET_INTERVAL_MAX: 2.0, // 追跡目標を引き直す間隔（最大）[s]
+    CHASE_RANGE_TILES: 3, // 追跡目標の抽選範囲：最寄り生存プレイヤーのタイル±3タイル（GDD §6 v0.9）
+    ARRIVE_DIST: 8, // 目標到達とみなす距離 [px]
+    STUCK_TIME: 0.25, // 壁・戦車に行き詰まったと判断するまでの時間 [s]
+    CHASE_PICK_TRIES: 20, // 追跡目標（床タイル）の抽選試行回数
+    DODGE_DETECT_RADIUS: 110, // プレイヤー弾の接近を検知する半径 [px]（ローバーと同じ調整値）
+    DODGE_CHANCE: 0.5, // 回避を試みる確率（難易度によらず50%固定。GDD §6 v0.9）
+    DODGE_TIME: 0.3, // 回避移動の継続時間 [s]
+    DODGE_COOLDOWN: 0.8, // 回避判定のクールダウン [s]
   },
 
   MINELAYER: {
@@ -117,8 +157,34 @@ export const BALANCE = {
     RADIUS: 8, // 地雷本体の半径 [px]（弾との接触＝誘爆の判定・描画に使用）
   },
 
+  DIFFICULTY: {
+    // 難易度別の調整値（GDD §8.3 v0.9 の表）。敵の脅威度のみを変え、プレイヤー性能は不変。
+    // 値の選択・解決は src/core/difficulty.ts が担う（ここは数値の集約のみ）。
+    easy: {
+      LIVES: 5, // 初期残機
+      FIRE_INTERVAL_MULT: 1.4, // 敵の発射間隔倍率（ゆっくり）
+      BULLET_SPEED_MULT: 0.9, // 敵弾速の倍率（スナイパー弾にも適用）
+      TURRET_RICOCHET_CHANCE: 0.4, // 固定砲台（A・C）の跳弾狙撃確率（E は常時100%）
+      ROVER_DODGE_CHANCE: 0.35, // ローバーの回避成功率
+    },
+    normal: {
+      LIVES: 3,
+      FIRE_INTERVAL_MULT: 1.0,
+      BULLET_SPEED_MULT: 1.0,
+      TURRET_RICOCHET_CHANCE: 0.75,
+      ROVER_DODGE_CHANCE: 0.5,
+    },
+    hard: {
+      LIVES: 3,
+      FIRE_INTERVAL_MULT: 0.75, // 矢継ぎ早
+      BULLET_SPEED_MULT: 1.1,
+      TURRET_RICOCHET_CHANCE: 1.0,
+      ROVER_DODGE_CHANCE: 0.65,
+    },
+  },
+
   GAME: {
-    LIVES: 3, // 初期残機（GDD §8。2P 協力時も2人で共有・初期3のまま：GDD §12.5）
+    LIVES: 3, // 初期残機（NORMAL 基準の既定値。難易度別の実効値は DIFFICULTY.*.LIVES。GDD §8・§8.3）
     MAX_PLAYERS: 2, // 最大プレイヤー数（ローカル2P協力。GDD §12.5）
     START_GRACE: 1.0, // ステージ開始後、敵が射撃しない時間 [s]（開幕即死防止）
     BANNER_TIME: 2.0, // 「MISSION n」表示時間 [s]（GDD §8）
@@ -187,6 +253,12 @@ export const COLORS = {
   MINELAYER_BODY: 0xcfae2e, // 敵D「マインレイヤー」は黄系のオリジナル配色（GDD §6 v0.6）
   MINELAYER_TRACK: 0x8a7217,
   MINELAYER_TURRET: 0xffe98f,
+  REFLECTOR_BODY: 0x2aa8a0, // 敵E「リフレクター」は青緑（シアン）系のオリジナル配色（GDD §6 v0.9）
+  REFLECTOR_TRACK: 0x1a6d68,
+  REFLECTOR_TURRET: 0x8ff2e8,
+  CHASER_BODY: 0xaab4bf, // 敵F「チェイサー」は白銀系のオリジナル配色（GDD §6 v0.9）
+  CHASER_TRACK: 0x6e7883,
+  CHASER_TURRET: 0xf2f6fa,
   WALL_X: 0x8a6d4c, // 破壊可能壁 X（土嚢風の茶系。恒久壁と区別）
   WALL_X_EDGE: 0xa88860,
   MINE: 0x3a3f4d, // 地雷本体（プレイヤー設置）

@@ -3,6 +3,7 @@
  * ロジック（編集・検証・保存・共有）はすべて src/core/editor.ts にあり、
  * ここはグリッド描画とマウス/ボタンUIだけの薄い層（CLAUDE.md 規約）。
  * - 盤面：クリック/ドラッグで選択中タイルを塗る。右クリック/右ドラッグで床に戻す。
+ *   パレットは `.`床／`#`壁／`X`破壊可能壁／`H`穴／`P`自機／`A`〜`F`敵6種（GDD §7 v0.9）。
  * - 上バー（外周 row0 の上）：タイルパレット。下バー（外周 row16 の上）：操作ボタン。
  *   どちらも外周タイル（編集不可）に重ねるため、編集領域は隠れない。
  * - 書き出し/読み込みは prompt()（コピペ共有。GDD §12.7）。
@@ -36,6 +37,8 @@ const TILE_LABELS: Record<EditorTile, string> = {
   B: "敵B",
   C: "敵C",
   D: "敵D",
+  E: "敵E",
+  F: "敵F",
 };
 
 /** タイルの塗り色（盤面・パレット共通。戦車系は本体色で示す） */
@@ -49,6 +52,8 @@ const TILE_COLORS: Record<EditorTile, number> = {
   B: COLORS.ROVER_BODY,
   C: COLORS.SNIPER_BODY,
   D: COLORS.MINELAYER_BODY,
+  E: COLORS.REFLECTOR_BODY,
+  F: COLORS.CHASER_BODY,
 };
 
 export class EditorScene extends Phaser.Scene {

@@ -99,7 +99,7 @@ describe("ローバーAI（ステートマシン）", () => {
 
   it("プレイヤーの弾が接近すると DODGE に遷移し、時間経過で WANDER に戻る", () => {
     const player = { x: 80, y: 140, alive: true };
-    // rng=0.2：回避判定 0.2 < DODGE_CHANCE(0.35) → 回避成功
+    // rng=0.2：回避判定 0.2 < 回避成功率（NORMAL=50%。GDD §8.3）→ 回避成功
     const rngLow = (): number => 0.2;
     const e = createRover(80, 48, rngLow);
     const threat = makeBullet({ x: 80, y: 110, vx: 0, vy: -200, owner: player });
@@ -111,9 +111,9 @@ describe("ローバーAI（ステートマシン）", () => {
     expect(e.state).toBe("WANDER");
   });
 
-  it("回避の成功率は低め：乱数が DODGE_CHANCE を超えると回避しない", () => {
+  it("回避の成功率は確率制：乱数が成功率を超えると回避しない", () => {
     const player = { x: 80, y: 140, alive: true };
-    // rng=0.9：0.9 > DODGE_CHANCE(0.35) → 回避失敗（WANDER のまま）
+    // rng=0.9：0.9 > 回避成功率（NORMAL=50%）→ 回避失敗（WANDER のまま）
     const rngHigh = (): number => 0.9;
     const e = createRover(80, 48, rngHigh);
     const threat = makeBullet({ x: 80, y: 110, vx: 0, vy: -200, owner: player });

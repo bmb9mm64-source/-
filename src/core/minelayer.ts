@@ -14,7 +14,8 @@
  * Phaser 非依存の純粋 TS。乱数は Rng を注入して決定的テスト可能。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
+import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, scaleBulletSpeed, spawnBullet } from "./bullet";
+import { type DifficultyMods, NORMAL_MODS } from "./difficulty";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
 import { type Mine, type MineConfig, tryPlaceMine } from "./mine";
 import { pickWanderTarget } from "./rover";
@@ -42,10 +43,10 @@ export interface MinelayerTank extends TankBody {
   stuckTimer: number; // 行き詰まり（壁・戦車）継続時間 [s]
 }
 
-/** 次回発射間隔（平均±ゆらぎ）を引く */
-export function minelayerNextFireInterval(rng: Rng): number {
+/** 次回発射間隔（平均±ゆらぎ）×難易度倍率 を引く（GDD §8.3。敷設間隔は「発射」でないため対象外） */
+export function minelayerNextFireInterval(rng: Rng, intervalMult = 1): number {
   const c = BALANCE.MINELAYER;
-  return c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR);
+  return (c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR)) * intervalMult;
 }
 
 /** 次回敷設間隔（平均±ゆらぎ）を引く */
@@ -54,8 +55,13 @@ export function minelayerNextMineInterval(rng: Rng): number {
   return c.MINE_INTERVAL_MEAN + randRange(rng, -c.MINE_INTERVAL_VAR, c.MINE_INTERVAL_VAR);
 }
 
-/** マインレイヤーを生成する（初期は下向き。目標は自位置＝初回更新で引き直される） */
-export function createMinelayer(x: number, y: number, rng: Rng): MinelayerTank {
+/** マインレイヤーを生成する（初期は下向き。目標は自位置＝初回更新で引き直される。mods 省略時は NORMAL 相当） */
+export function createMinelayer(
+  x: number,
+  y: number,
+  rng: Rng,
+  mods: DifficultyMods = NORMAL_MODS,
+): MinelayerTank {
   return {
     kind: "minelayer",
     x,
@@ -65,7 +71,7 @@ export function createMinelayer(x: number, y: number, rng: Rng): MinelayerTank {
     half: BALANCE.MINELAYER.SIZE / 2,
     radius: BALANCE.MINELAYER.RADIUS,
     alive: true,
-    fireTimer: minelayerNextFireInterval(rng),
+    fireTimer: minelayerNextFireInterval(rng, mods.fireIntervalMult),
     mineTimer: minelayerNextMineInterval(rng),
     target: { x, y },
     retargetTimer: 0,
@@ -82,6 +88,7 @@ export interface MinelayerUpdateContext {
   stage: ParsedStage;
   grace: number; // 開幕グレースの残り時間 [s]（>0 の間は撃たない）
   rng: Rng;
+  mods?: DifficultyMods; // 難易度の実効調整値（省略時は NORMAL 相当。GDD §8.3）
 }
 
 /** 全生存プレイヤーが safeDist 以上離れているか（生存者がいなければ false＝敷設しない） */
@@ -104,6 +111,7 @@ function playersFarEnough(
 /** マインレイヤーの更新（1フレーム分。dt は秒） */
 export function updateMinelayer(e: MinelayerTank, dt: number, ctx: MinelayerUpdateContext): void {
   const c = BALANCE.MINELAYER;
+  const mods = ctx.mods ?? NORMAL_MODS;
 
   // --- 標的選択（GDD §12.5）：射線が通る最も近い生存者。全員遮蔽なら最も近い生存者（照準のみ） ---
   const pick = selectTarget(ctx.stage, e.x, e.y, ctx.players);
@@ -163,7 +171,8 @@ export function updateMinelayer(e: MinelayerTank, dt: number, ctx: MinelayerUpda
     pick.hasLos && // 標的への射線が通っている（全員遮蔽なら照準追従のみ。GDD §12.5）
     Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL; // 砲塔がほぼ狙い通り
   if (ready) {
-    spawnBullet(ctx.bullets, e, e.turretAngle, ENEMY_BULLET_CFG); // 225px/s（GDD §6 v0.6）
-    e.fireTimer = minelayerNextFireInterval(ctx.rng);
+    // 225px/s ×難易度弾速倍率（GDD §6 v0.6・§8.3）
+    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult));
+    e.fireTimer = minelayerNextFireInterval(ctx.rng, mods.fireIntervalMult);
   }
 }

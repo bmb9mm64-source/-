@@ -12,6 +12,7 @@ export interface Bullet {
   vy: number;
   radius: number;
   bounces: number; // これまでの反射回数
+  maxBounces?: number; // この弾固有の反射上限（未設定＝BALANCE.BULLET.MAX_BOUNCES。敵E弾は2。GDD §6 v0.9）
   owner: object; // 同時発射数のカウント用（弾自体は発射者を問わず全戦車に当たる）
   dead: boolean;
 }
@@ -21,6 +22,7 @@ export interface BulletSpawnConfig {
   SPEED: number;
   RADIUS: number;
   MUZZLE_OFFSET: number;
+  MAX_BOUNCES?: number; // 弾固有の反射上限（省略時は共通の BALANCE.BULLET.MAX_BOUNCES）
 }
 
 /** 弾の生成。owner の砲口位置から angle 方向へ発射し、bullets に追加する */
@@ -40,6 +42,7 @@ export function spawnBullet(
     owner,
     dead: false,
   };
+  if (cfg.MAX_BOUNCES !== undefined) b.maxBounces = cfg.MAX_BOUNCES; // 弾固有の反射上限（敵E弾）
   bullets.push(b);
   return b;
 }
@@ -57,6 +60,22 @@ export const SNIPER_BULLET_CFG: BulletSpawnConfig = {
   RADIUS: BALANCE.BULLET.RADIUS,
   MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
 };
+
+/** 敵E「リフレクター」弾の生成設定（GDD §6 v0.9：300px/s・この弾だけ反射上限2回） */
+export const REFLECTOR_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.REFLECTOR_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+  MAX_BOUNCES: BALANCE.BULLET.REFLECTOR_MAX_BOUNCES,
+};
+
+/**
+ * 敵弾速の難易度倍率を適用した生成設定を返す（GDD §8.3。倍率1.0はそのまま共有して割り当てを避ける）。
+ * プレイヤー弾には使わない（プレイヤー性能は難易度で不変）。
+ */
+export function scaleBulletSpeed(cfg: BulletSpawnConfig, mult: number): BulletSpawnConfig {
+  return mult === 1 ? cfg : { ...cfg, SPEED: cfg.SPEED * mult };
+}
 
 /** owner が場に出している生存弾の数 */
 export function liveBulletCount(bullets: readonly Bullet[], owner: object): number {
@@ -104,7 +123,8 @@ function circleHitsWall(stage: ParsedStage, x: number, y: number, rad: number): 
  * 軸ごとに移動→衝突判定→該当軸の速度反転＋押し戻し。
  * 角で同フレームに両軸が反射しても反射回数は「1回」と数える。
  * 破壊可能壁 X に触れた弾は反射せず消滅する（GDD §5。壁は壊れない）。
- * ※最大弾速340px/s（スナイパー弾） × dt上限0.05s = 最大17px/フレーム < タイル32px なので突き抜けは起きない。
+ * 反射上限は「弾固有の値（b.maxBounces。敵E弾=2）＞引数 maxBounces ＞共通既定1」の優先で解決する。
+ * ※最大弾速374px/s（スナイパー弾×難易度1.1） × dt上限0.05s = 最大18.7px/フレーム < タイル32px なので突き抜けは起きない。
  */
 export function updateBullet(
   b: Bullet,
@@ -113,6 +133,7 @@ export function updateBullet(
   maxBounces: number = BALANCE.BULLET.MAX_BOUNCES,
 ): void {
   const eps = BALANCE.EPS;
+  const bounceLimit = b.maxBounces ?? maxBounces; // 弾固有の上限が最優先（敵E「リフレクター」の2回反射弾）
   let bounced = false;
 
   // --- X軸移動 ---
@@ -145,7 +166,7 @@ export function updateBullet(
 
   if (bounced) {
     b.bounces++;
-    if (b.bounces > maxBounces) b.dead = true; // 反射上限超過（2回目の壁接触）で消滅
+    if (b.bounces > bounceLimit) b.dead = true; // 反射上限超過（上限+1回目の壁接触）で消滅
   }
 }
 

@@ -6,7 +6,8 @@
  * Phaser 非依存の純粋 TS。乱数は Rng を注入して決定的テスト可能。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
+import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, scaleBulletSpeed, spawnBullet } from "./bullet";
+import { type DifficultyMods, NORMAL_MODS } from "./difficulty";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
 import { type ParsedStage, tileAt } from "./stage";
 import { moveTank, type TankBlocker } from "./tank";
@@ -29,14 +30,14 @@ export interface RoverTank extends TankBody {
   dodgeCooldown: number; // 次の回避判定までの残り時間 [s]
 }
 
-/** 次回発射間隔（平均±ゆらぎ）を引く */
-export function roverNextInterval(rng: Rng): number {
+/** 次回発射間隔（平均±ゆらぎ）×難易度倍率 を引く（GDD §8.3） */
+export function roverNextInterval(rng: Rng, intervalMult = 1): number {
   const c = BALANCE.ROVER;
-  return c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR);
+  return (c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR)) * intervalMult;
 }
 
-/** ローバーを生成する（初期は下向き。目標は自位置＝初回更新で引き直される） */
-export function createRover(x: number, y: number, rng: Rng): RoverTank {
+/** ローバーを生成する（初期は下向き。目標は自位置＝初回更新で引き直される。mods 省略時は NORMAL 相当） */
+export function createRover(x: number, y: number, rng: Rng, mods: DifficultyMods = NORMAL_MODS): RoverTank {
   return {
     kind: "rover",
     x,
@@ -47,7 +48,7 @@ export function createRover(x: number, y: number, rng: Rng): RoverTank {
     radius: BALANCE.ROVER.RADIUS,
     alive: true,
     state: "WANDER",
-    fireTimer: roverNextInterval(rng),
+    fireTimer: roverNextInterval(rng, mods.fireIntervalMult),
     target: { x, y },
     retargetTimer: 0,
     stuckTimer: 0,
@@ -89,6 +90,7 @@ export interface RoverUpdateContext {
   stage: ParsedStage;
   grace: number; // 開幕グレースの残り時間 [s]（>0 の間は撃たない）
   rng: Rng;
+  mods?: DifficultyMods; // 難易度の実効調整値（省略時は NORMAL 相当。GDD §8.3）
 }
 
 /** 弾がいずれかのプレイヤーの発射した弾か（参照比較。GDD §12.5：2P の弾も回避対象） */
@@ -113,6 +115,7 @@ function findThreatBullet(e: RoverTank, ctx: RoverUpdateContext): Bullet | null 
 /** ローバーの更新（1フレーム分。dt は秒） */
 export function updateRover(e: RoverTank, dt: number, ctx: RoverUpdateContext): void {
   const c = BALANCE.ROVER;
+  const mods = ctx.mods ?? NORMAL_MODS;
 
   // --- 標的選択（GDD §12.5）：射線が通る最も近い生存者。全員遮蔽なら最も近い生存者（照準のみ） ---
   const pick = selectTarget(ctx.stage, e.x, e.y, ctx.players);
@@ -127,7 +130,8 @@ export function updateRover(e: RoverTank, dt: number, ctx: RoverUpdateContext): 
     const threat = findThreatBullet(e, ctx);
     if (threat) {
       e.dodgeCooldown = c.DODGE_COOLDOWN; // 成功・失敗に関わらず判定間隔を空ける
-      if (ctx.rng() < c.DODGE_CHANCE) {
+      if (ctx.rng() < mods.roverDodgeChance) {
+        // 回避成功率は難易度連動（EASY35%／NORMAL50%／HARD65%。GDD §8.3）
         // 弾道と垂直方向へ短く逃げる（左右はランダム）
         const len = Math.hypot(threat.vx, threat.vy) || 1;
         const sign = ctx.rng() < 0.5 ? 1 : -1;
@@ -189,7 +193,7 @@ export function updateRover(e: RoverTank, dt: number, ctx: RoverUpdateContext): 
     pick.hasLos && // 標的への射線が通っている（全員遮蔽なら照準追従のみ。GDD §12.5）
     Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL; // 砲塔がほぼ狙い通り
   if (ready) {
-    spawnBullet(ctx.bullets, e, e.turretAngle, ENEMY_BULLET_CFG);
-    e.fireTimer = roverNextInterval(ctx.rng);
+    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult));
+    e.fireTimer = roverNextInterval(ctx.rng, mods.fireIntervalMult);
   }
 }

@@ -53,6 +53,20 @@ describe("エディタ：グリッド編集", () => {
     expect(setTile(g, 1, 1, "D")).toBe(true); // 既存の敵タイルの置き換えは可
     expect(g[1]![1]).toBe("D");
   });
+
+  it("敵E/F を設置でき、合計12体の上限カウントに含まれる（GDD §7 v0.9・§12.7）", () => {
+    const g = emptyGrid();
+    expect(setTile(g, 3, 3, "E")).toBe(true);
+    expect(setTile(g, 5, 3, "F")).toBe(true);
+    expect(g[3]![3]).toBe("E");
+    expect(g[3]![5]).toBe("F");
+    // E/F 込みで12体まで埋める → 13体目（種別を問わず）は拒否
+    for (let i = 0; i < EDITOR_MAX_ENEMIES - 2; i++) {
+      expect(setTile(g, 1 + i, 5, i % 2 === 0 ? "E" : "F")).toBe(true);
+    }
+    expect(setTile(g, 20, 10, "A")).toBe(false); // E/F も上限カウントに含まれている
+    expect(setTile(g, 3, 3, "F")).toBe(true); // 既存の敵タイルの置き換えは可
+  });
 });
 
 describe("エディタ：検証", () => {
@@ -96,10 +110,12 @@ describe("エディタ：検証", () => {
 });
 
 describe("エディタ：エクスポート／インポート", () => {
-  it("往復で内容が保たれる（名前付き）", () => {
+  it("往復で内容が保たれる（名前付き。E/F 込み）", () => {
     const g = emptyGrid();
     setTile(g, 3, 3, "P");
     setTile(g, 20, 8, "A");
+    setTile(g, 18, 4, "E");
+    setTile(g, 6, 10, "F");
     setTile(g, 10, 5, "X");
     const json = exportStage(g, "テスト面");
     const back = importStage(json);

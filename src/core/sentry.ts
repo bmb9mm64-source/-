@@ -4,7 +4,8 @@
  * Phaser 非依存の純粋 TS。乱数は Rng を注入してテスト可能にする。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, spawnBullet } from "./bullet";
+import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, scaleBulletSpeed, spawnBullet } from "./bullet";
+import { type DifficultyMods, NORMAL_MODS } from "./difficulty";
 import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
 import { findOuterWallRicochet } from "./ricochetAim";
 import type { ParsedStage } from "./stage";
@@ -25,14 +26,14 @@ export interface SentryTank extends TankBody {
   ricochetMode: boolean; // 抽選に当たり跳弾狙撃を試みているか（GDD §6 v0.4）
 }
 
-/** 次回発射間隔（平均±ゆらぎ）を引く */
-export function sentryNextInterval(rng: Rng): number {
+/** 次回発射間隔（平均±ゆらぎ）×難易度倍率 を引く（GDD §8.3：EASY×1.4／HARD×0.75） */
+export function sentryNextInterval(rng: Rng, intervalMult = 1): number {
   const c = BALANCE.SENTRY;
-  return c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR);
+  return (c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR)) * intervalMult;
 }
 
-/** セントリーを生成する（初期は下向き） */
-export function createSentry(x: number, y: number, rng: Rng): SentryTank {
+/** セントリーを生成する（初期は下向き。mods 省略時は NORMAL 相当） */
+export function createSentry(x: number, y: number, rng: Rng, mods: DifficultyMods = NORMAL_MODS): SentryTank {
   return {
     kind: "sentry",
     x,
@@ -43,7 +44,7 @@ export function createSentry(x: number, y: number, rng: Rng): SentryTank {
     radius: BALANCE.SENTRY.RADIUS,
     alive: true,
     state: "IDLE",
-    fireTimer: sentryNextInterval(rng),
+    fireTimer: sentryNextInterval(rng, mods.fireIntervalMult),
     jitter: 0,
     jitterTimer: 0,
     ricochetRolled: false,
@@ -58,6 +59,7 @@ export interface SentryUpdateContext {
   stage: ParsedStage;
   grace: number; // 開幕グレースの残り時間 [s]（>0 の間は撃たない）
   rng: Rng;
+  mods?: DifficultyMods; // 難易度の実効調整値（省略時は NORMAL 相当。GDD §8.3）
 }
 
 /**
@@ -66,11 +68,13 @@ export interface SentryUpdateContext {
  * （GDD §12.5。1人プレイでは従来と同じ挙動）。
  * どの状態でも砲塔は狙い（通常は標的、跳弾狙撃中は反射点）へ追従し、±数度のブレを載せる。
  * 発射条件（GDD v0.2 §6）：発射間隔消化・同時1発・砲塔が狙い方向 ±0.15rad 以内・射線が通る。
- * 跳弾狙撃（GDD §6 v0.4）：標的への直接射線が塞がれているとき、AIM 突入ごとに1回だけ抽選（20%）し、
- * 当たれば外周壁1回反射の射線を毎フレーム再計算して反射点方向へ撃つ。直接射線があれば常に通常射撃を優先。
+ * 跳弾狙撃（GDD §6 v0.9）：標的への直接射線が塞がれているとき、AIM 突入ごとに1回だけ抽選し
+ * （確率は難易度連動：EASY40%／NORMAL75%／HARD100%）、当たれば外周壁1回反射の射線を
+ * 毎フレーム再計算して反射点方向へ撃つ。直接射線があれば常に通常射撃を優先。
  */
 export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext): void {
   const c = BALANCE.SENTRY;
+  const mods = ctx.mods ?? NORMAL_MODS;
 
   // --- 照準ブレの引き直し（全状態共通） ---
   e.jitterTimer -= dt;
@@ -90,7 +94,7 @@ export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext
   if (e.state === "AIM" && !e.ricochetRolled) {
     // AIM 突入後の初回フレームで抽選を1回だけ消化（リロードごと）
     e.ricochetRolled = true;
-    e.ricochetMode = !direct && ctx.rng() < c.RICOCHET_AIM_CHANCE;
+    e.ricochetMode = !direct && ctx.rng() < mods.turretRicochetChance; // 難易度連動（GDD §6 v0.9）
   }
   const shot =
     e.state === "AIM" && !direct && e.ricochetMode
@@ -114,8 +118,8 @@ export function updateSentry(e: SentryTank, dt: number, ctx: SentryUpdateContext
         Math.abs(angleDiff(aimTarget, e.turretAngle)) < c.FIRE_ANGLE_TOL && // 砲塔がほぼ狙い通り
         (direct || shot !== null); // 直接射線 or 跳弾射線のどちらかが成立
       if (ready) {
-        spawnBullet(ctx.bullets, e, e.turretAngle, ENEMY_BULLET_CFG);
-        e.fireTimer = sentryNextInterval(ctx.rng);
+        spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult));
+        e.fireTimer = sentryNextInterval(ctx.rng, mods.fireIntervalMult);
         e.state = "RELOAD";
         e.ricochetRolled = false; // 次の AIM サイクルで再抽選
         e.ricochetMode = false;

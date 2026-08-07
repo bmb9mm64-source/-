@@ -1,6 +1,6 @@
 /**
- * 敵C「スナイパー」のテスト（決定的な乱数を注入。GDD §6 v0.6）。
- * ブレなしの精密照準・弾速340px/s・砲塔回転70°/s・跳弾狙撃35%を検証する。
+ * 敵C「スナイパー」のテスト（決定的な乱数を注入。GDD §6 v0.6・v0.9）。
+ * ブレなしの精密照準・弾速340px/s・砲塔回転70°/s・跳弾狙撃（難易度連動。既定 NORMAL=75%）を検証する。
  */
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
@@ -93,18 +93,18 @@ describe("スナイパーAI（ステートマシン）", () => {
     expect(e.turretAngle).toBeCloseTo(BALANCE.SNIPER.TURN_SPEED * 0.1, 6); // 7°ぶんだけ回る
   });
 
-  it("射線が壁で遮られ跳弾抽選にも外れる（rng≥35%）と一切撃たない", () => {
+  it("射線が壁で遮られ跳弾抽選にも外れる（rng≥難易度確率）と一切撃たない", () => {
     const blocked = makeStage(BLOCKED_MID_10X8);
-    const rng = (): number => 0.4; // 0.4 >= 0.35 → 跳弾狙撃モードに入らない
+    const rng = (): number => 0.8; // 0.8 >= 0.75（NORMAL の跳弾狙撃確率。GDD §6 v0.9）→ 跳弾狙撃モードに入らない
     const e = readySniper(2.5 * T, 5 * T, rng);
     const ctx = makeCtx({ players: [{ x: 7.5 * T, y: 5 * T, alive: true }], stage: blocked, rng });
     for (let i = 0; i < 120; i++) updateSniper(e, 0.05, ctx); // 6秒
     expect(ctx.bullets).toHaveLength(0);
   });
 
-  it("跳弾狙撃の抽選は 35%：rng=0.3（セントリーの20%なら外れる値）で外周反射弾を撃つ", () => {
+  it("跳弾狙撃の抽選は難易度連動（既定 NORMAL=75%）：rng=0.3 で外周反射弾を撃つ", () => {
     const blocked = makeStage(BLOCKED_MID_10X8);
-    const rng = (): number => 0.3; // 0.3 < 0.35 → 跳弾狙撃モード（0.3 >= 0.2 なのでセントリーなら不成立）
+    const rng = (): number => 0.3; // 0.3 < 0.75 → 跳弾狙撃モード（GDD §6 v0.9。旧個別値35%は廃止）
     const e = readySniper(2.5 * T, 5 * T, rng);
     const ctx = makeCtx({ players: [{ x: 7.5 * T, y: 5 * T, alive: true }], stage: blocked, rng });
     for (let i = 0; i < 120; i++) updateSniper(e, 0.05, ctx); // 6秒（70°/s の旋回時間を含む）

@@ -1,6 +1,6 @@
 /**
- * ゲームワールド — ミッション進行・戦車・弾・地雷・敵AI 4種
- * （セントリー／ローバー／スナイパー／マインレイヤー）の
+ * ゲームワールド — ミッション進行・戦車・弾・地雷・敵AI 6種
+ * （セントリー／ローバー／スナイパー／マインレイヤー／リフレクター／チェイサー）の
  * ゲーム状態と更新ロジック（Phaser 非依存の純粋 TS）。
  * シーン（Phaser 側）は入力を渡して結果を描画・発音するだけの薄い層にする（CLAUDE.md 規約）。
  *
@@ -15,14 +15,21 @@
  *     全員退場した時点で残機-1＋現ミッションをリセット。片方生存のままクリアすれば
  *     次ミッションで全員復帰（loadMission が全員を作り直す）。
  *   - 2P の初期位置は GDD 未記載のため P1 の隣接床タイル（stage.findNearbyFloor の暫定解釈）。
+ *
+ * 難易度（GDD §8.3 v0.9）：コンストラクタで受け取り（既定 normal＝従来挙動）、
+ *   初期残機と、敵の発射間隔・敵弾速・跳弾狙撃確率・ローバー回避成功率（mods）に適用する。
+ *   プレイヤー性能・ステージ地形・敵配置は難易度で変えない。
  */
 import { BALANCE } from "../config/balance";
 import { type Bullet, bulletHitsTank, resolveBulletVsBullet, updateBullet } from "./bullet";
+import { createChaser, type ChaserTank, updateChaser } from "./chaser";
+import { type Difficulty, type DifficultyMods, resolveDifficulty } from "./difficulty";
 import { tryFire } from "./firing";
 import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
 import { type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
 import { createMinelayer, type MinelayerTank, updateMinelayer } from "./minelayer";
+import { createReflector, type ReflectorTank, updateReflector } from "./reflector";
 import { createRover, type RoverTank, updateRover } from "./rover";
 import { createSentry, type SentryTank, updateSentry } from "./sentry";
 import { createSniper, type SniperTank, updateSniper } from "./sniper";
@@ -33,8 +40,8 @@ import type { PlayerTank } from "./types";
 /** ワールドの進行状態（ポーズはシーン側の責務なので含まない） */
 export type GameStatus = "banner" | "playing" | "gameover" | "allclear";
 
-/** 敵戦車（セントリー／ローバー／スナイパー／マインレイヤー） */
-export type EnemyTank = SentryTank | RoverTank | SniperTank | MinelayerTank;
+/** 敵戦車（セントリー／ローバー／スナイパー／マインレイヤー／リフレクター／チェイサー） */
+export type EnemyTank = SentryTank | RoverTank | SniperTank | MinelayerTank | ReflectorTank | ChaserTank;
 
 /** ミッション定義（src/stages/missions.ts の要素と互換） */
 export interface MissionDef {
@@ -74,6 +81,7 @@ function createPlayer(x: number, y: number, index: number): PlayerTank {
 export class GameWorld {
   readonly missions: readonly MissionDef[];
   readonly playerCount: number; // 1（従来）または 2（ローカル協力。GDD §12.5）
+  readonly difficulty: Difficulty; // 選択難易度（GDD §8.3。既定 normal）
   missionIndex = 0;
   stage!: ParsedStage; // 現ミッションの盤面（X 破壊で書き換わるためミッション開始ごとに再解析）
   stageVersion = 0; // 盤面の描画キャッシュ更新用（ミッション切替・X 破壊で増える）
@@ -97,12 +105,20 @@ export class GameWorld {
   lastClearTime: number | null = null; // 直近にクリアしたミッションの確定タイム [s]
 
   private readonly rng: Rng;
+  private readonly mods: DifficultyMods; // 難易度の実効調整値（敵AIへ注入。GDD §8.3）
 
-  constructor(missions: readonly MissionDef[], rng: Rng = Math.random, playerCount = 1) {
+  constructor(
+    missions: readonly MissionDef[],
+    rng: Rng = Math.random,
+    playerCount = 1,
+    difficulty: Difficulty = "normal",
+  ) {
     if (missions.length === 0) throw new Error("ミッションが1つもありません");
     this.missions = missions;
     this.rng = rng;
     this.playerCount = Math.min(Math.max(1, Math.floor(playerCount)), BALANCE.GAME.MAX_PLAYERS);
+    this.difficulty = difficulty;
+    this.mods = resolveDifficulty(difficulty);
     this.resetGame();
   }
 
@@ -129,10 +145,12 @@ export class GameWorld {
       this.players.push(createPlayer(spawn.x, spawn.y, i));
     }
     this.enemies = [
-      ...this.stage.sentrySpawns.map((sp) => createSentry(sp.x, sp.y, this.rng)),
-      ...this.stage.roverSpawns.map((sp) => createRover(sp.x, sp.y, this.rng)),
-      ...this.stage.sniperSpawns.map((sp) => createSniper(sp.x, sp.y, this.rng)),
-      ...this.stage.minelayerSpawns.map((sp) => createMinelayer(sp.x, sp.y, this.rng)),
+      ...this.stage.sentrySpawns.map((sp) => createSentry(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.roverSpawns.map((sp) => createRover(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.sniperSpawns.map((sp) => createSniper(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.minelayerSpawns.map((sp) => createMinelayer(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.reflectorSpawns.map((sp) => createReflector(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.chaserSpawns.map((sp) => createChaser(sp.x, sp.y, this.rng, this.mods)),
     ];
     this.bullets = [];
     this.mines = [];
@@ -144,7 +162,7 @@ export class GameWorld {
 
   /** ゲーム全体を最初からやり直す（Rキー・ゲームオーバー後の再開） */
   resetGame(): void {
-    this.lives = BALANCE.GAME.LIVES;
+    this.lives = this.mods.lives; // 初期残機は難易度で決まる（EASY5／NORMAL3／HARD3。GDD §8.3）
     this.kills = 0;
     this.clearedTimes = []; // タイム記録もランごとにやり直し（GDD §8.5）
     this.lastClearIndex = null;
@@ -270,6 +288,7 @@ export class GameWorld {
             stage: this.stage,
             grace: this.grace,
             rng: this.rng,
+            mods: this.mods,
           });
           break;
         case "sniper":
@@ -279,6 +298,19 @@ export class GameWorld {
             stage: this.stage,
             grace: this.grace,
             rng: this.rng,
+            mods: this.mods,
+          });
+          break;
+        case "reflector":
+          // 弾は REFLECTOR_BULLET_CFG（反射上限2回を弾自身が持つ）で生成されるため、
+          // 下の弾更新ループは特別扱い不要（updateBullet が b.maxBounces を優先する）
+          updateReflector(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+            mods: this.mods,
           });
           break;
         case "rover":
@@ -289,6 +321,18 @@ export class GameWorld {
             stage: this.stage,
             grace: this.grace,
             rng: this.rng,
+            mods: this.mods,
+          });
+          break;
+        case "chaser":
+          updateChaser(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+            mods: this.mods,
           });
           break;
         case "minelayer":
@@ -302,6 +346,7 @@ export class GameWorld {
             stage: this.stage,
             grace: this.grace,
             rng: this.rng,
+            mods: this.mods,
           });
           break;
       }
