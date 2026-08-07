@@ -133,27 +133,26 @@ export class EditorScene extends Phaser.Scene {
     const bottomBar = this.add.graphics().setDepth(5);
     bottomBar.fillStyle(0x11141c, 0.92);
     bottomBar.fillRect(0, h - BALANCE.TILE, w, BALANCE.TILE);
+    // ラベルは省略形にしない（「保1」では初見で意味が取れない。GDD §12.7 v0.17）
     const buttons: [string, () => void][] = [
-      ["▶1P", () => this.startTestPlay(1)],
-      ["▶2P", () => this.startTestPlay(2)],
+      ["▶ 試遊1P", () => this.startTestPlay(1)],
+      ["▶ 試遊2P", () => this.startTestPlay(2)],
     ];
-    for (let n = 1; n <= EDITOR_SLOT_COUNT; n++) buttons.push([`保${n}`, () => this.saveSlot(n)]);
-    for (let n = 1; n <= EDITOR_SLOT_COUNT; n++) buttons.push([`読${n}`, () => this.loadSlot(n)]);
+    for (let n = 1; n <= EDITOR_SLOT_COUNT; n++) buttons.push([`保存${n}`, () => this.saveSlot(n)]);
+    for (let n = 1; n <= EDITOR_SLOT_COUNT; n++) buttons.push([`読込${n}`, () => this.loadSlot(n)]);
     buttons.push(
-      ["出力", () => this.doExport()],
-      ["入力", () => this.doImport()],
-      ["消去", () => this.doClear()],
-      ["戻る", () => this.scene.start("TitleScene")],
+      ["書出", () => this.doExport()],
+      ["取込", () => this.doImport()],
+      ["全消去", () => this.doClear()],
+      ["タイトル", () => this.scene.start("TitleScene")],
     );
-    const bw = w / buttons.length;
-    buttons.forEach(([label, onClick], i) => {
-      this.add
-        .text(bw * i + bw / 2, h - 16, label, {
-          ...barStyle,
-          backgroundColor: "#343b4d",
-          padding: { x: 8, y: 4 },
-        })
-        .setOrigin(0.5)
+    // ボタンは等分割ではなく**実際の文字幅**で並べる。
+    // 等分割だと長いラベルが枠からはみ出して端のボタンが画面外に切れる（v0.17 で発生）。
+    const gap = 4;
+    const made = buttons.map(([label, onClick]) => {
+      const t = this.add
+        .text(0, h - 16, label, { ...barStyle, backgroundColor: "#343b4d", padding: { x: 6, y: 4 } })
+        .setOrigin(0, 0.5)
         .setDepth(6)
         .setInteractive({ useHandCursor: true })
         .on("pointerdown", (p: Phaser.Input.Pointer) => {
@@ -161,7 +160,14 @@ export class EditorScene extends Phaser.Scene {
           SFX.unlock();
           onClick();
         });
+      return t;
     });
+    const totalW = made.reduce((sum, t) => sum + t.width, 0) + gap * (made.length - 1);
+    let bx = Math.max(gap, (w - totalW) / 2); // 収まりきらない場合も左端から詰めて全ボタンを残す
+    for (const t of made) {
+      t.setX(bx);
+      bx += t.width + gap;
+    }
 
     // --- トースト（検証結果などの一時表示） ---
     this.toast = this.add
@@ -270,6 +276,8 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private doClear(): void {
+    // 取り消せない破壊的操作なので確認する（誤クリックで編集内容を失わないため。GDD §12.7 v0.17）
+    if (!window.confirm("編集中のステージを全て消去します。よろしいですか？")) return;
     this.grid = emptyGrid();
     editorSession.grid = this.grid;
     this.redrawBoard();

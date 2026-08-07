@@ -17,7 +17,9 @@ new Phaser.Game({
     // ウィンドウに合わせて拡大表示（v0.10。アスペクト比維持・中央寄せ。入力座標は Phaser が逆変換する）
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    expandParent: true,
+    // expandParent は親を基準サイズ（800px）まで広げてしまい、それより狭い画面で
+    // canvas が画面外へはみ出す。親（#app）は CSS で画面いっぱいにしてあるので不要。
+    expandParent: false,
   },
   scene: [TitleScene, GameScene, EditorScene],
   // ゲームロジックは core 側でデルタタイム更新するため物理エンジンは使わない

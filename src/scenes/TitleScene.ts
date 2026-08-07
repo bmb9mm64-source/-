@@ -79,18 +79,24 @@ export class TitleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // 操作説明（1P／2P。GDD §3・§12.5）
+    // 操作説明（GDD §3・§12.5・§3.5 v0.17）。
+    // 全環境ぶんを常に並べると初見の情報量が過大になるため、入力環境で出し分ける。
+    // タッチ環境の判定は「細かいポインタが無い＝マウスが無い」＝ CSS の hover/pointer メディア特性。
+    const touchOnly =
+      typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches;
+    const help = touchOnly
+      ? "画面の左半分をなぞって移動\n右半分をタッチして照準・連射\n右下のボタンで地雷 ／ 右上でポーズ"
+      : "【1P】WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ スペース・右クリック: 地雷\n" +
+        "【2P】パッド: 左スティック移動・右スティック照準・RB射撃・LB地雷\n" +
+        "　　　（パッド未接続時: 矢印キー移動・IJKL照準・Enter射撃・右Shift地雷）\n" +
+        "共通: Esc・P: ポーズ ／ T: タイトルへ ／ R: やり直し ／ M: 消音 ／ B: BGM";
     this.add
-      .text(
-        w / 2,
-        h / 2 + 34,
-        "【1P】WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ スペース・右クリック: 地雷\n" +
-          "【2P】パッド: 左スティック移動・右スティック照準・RB射撃・LB地雷\n" +
-          "　　　（パッド未接続時: 矢印キー移動・IJKL照準・Enter射撃・右Shift地雷）\n" +
-          "【スマホ】左半分で移動 ／ 右半分をタッチで照準・連射 ／ 右下ボタンで地雷\n" +
-          "共通: Esc・P: ポーズ ／ R: リスタート ／ M: 消音 ／ B: BGM",
-        { ...textStyle, fontSize: "14px", align: "center", lineSpacing: 6 },
-      )
+      .text(w / 2, h / 2 + 28, help, {
+        ...textStyle,
+        fontSize: "14px",
+        align: "center",
+        lineSpacing: 6,
+      })
       .setOrigin(0.5);
 
     // 難易度選択（EASY / NORMAL / HARD のトグル。選択は保存して次回も維持。GDD §8.3）
@@ -144,9 +150,10 @@ export class TitleScene extends Phaser.Scene {
 
     // 「続きから」（到達済みの最高ミッションから開始。全50面を毎回1面からやり直さないため。GDD §8.6）
     const reached = new Records(this.store, this.difficulty).reachedBest();
-    if (reached > 1) {
+    const hasContinue = reached > 1;
+    if (hasContinue) {
       this.add
-        .text(w / 2, h / 2 + 178, `[3] 続きから（M${reached}）`, {
+        .text(w / 2, h / 2 + 178, `${touchOnly ? "" : "[3] "}続きから（M${reached}）`, {
           ...textStyle,
           fontSize: "16px",
           backgroundColor: "#2b3040",
@@ -165,19 +172,19 @@ export class TitleScene extends Phaser.Scene {
       padding: { x: 18, y: 8 },
     };
     this.add
-      .text(w / 2 - 130, h / 2 + 140, "[1] 1人で出撃", buttonStyle)
+      .text(w / 2 - 130, h / 2 + 140, touchOnly ? "1人で出撃" : "[1] 1人で出撃", buttonStyle)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => start(1));
     this.add
-      .text(w / 2 + 130, h / 2 + 140, "[2] 2人で出撃", buttonStyle)
+      .text(w / 2 + 130, h / 2 + 140, touchOnly ? "2人で出撃" : "[2] 2人で出撃", buttonStyle)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => start(2));
 
     // ステージエディタへの入口（GDD §12.7）
     this.add
-      .text(w / 2, h / 2 + 208, "[E] ステージエディタ", {
+      .text(w / 2, h / 2 + 208, touchOnly ? "ステージエディタ" : "[E] ステージエディタ", {
         ...textStyle,
         fontSize: "15px",
         backgroundColor: "#2b3040",
@@ -192,8 +199,12 @@ export class TitleScene extends Phaser.Scene {
     kb?.on("keydown-TWO", () => start(2));
     kb?.on("keydown-E", () => this.scene.start("EditorScene"));
 
+    // 実際に押せるキーだけを案内する（「続きから」が無いときに 3 を案内しない。v0.17）
+    const keyHint = touchOnly
+      ? "ボタンをタップして選択"
+      : `クリックまたは ${hasContinue ? "1 / 2 / 3 / E" : "1 / 2 / E"} キーで選択`;
     const prompt = this.add
-      .text(w / 2, h / 2 + 236, "クリックまたは 1 / 2 / 3 / E キーで選択", {
+      .text(w / 2, h / 2 + 236, keyHint, {
         ...textStyle,
         fontSize: "14px",
       })

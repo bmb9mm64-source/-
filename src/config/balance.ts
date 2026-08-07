@@ -408,6 +408,7 @@ export const COLORS = {
   BULLET_EDGE: 0x8f8c7c,
   CROSSHAIR: 0xe8ecf5,
   HUD_CSS: "#e8ecf5", // Text 用 CSS 文字列
+  P2_CSS: "#8fe6b0", // 2P の HUD 文字色（戦車の砲塔色に合わせる。CSS 文字列）
   FLOOR_CSS: "#232733", // 背景色（ゲーム設定用 CSS 文字列）
   OVERLAY: 0x0a0c12, // オーバーレイの色（rgba(10,12,18) 相当）
   OVERLAY_ALPHA: 0.65, // オーバーレイの不透明度

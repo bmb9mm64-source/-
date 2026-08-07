@@ -2,6 +2,9 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<!-- スマホでは viewport 指定が無いと既定の約980px幅でレイアウトされ、画面全体が縮小されて
+     文字もボタンも極端に小さくなる（GDD §3.5 のタッチ操作が実質使えない）。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>ハネダン！</title>
 <!-- タブアイコン（外部ファイル不要のインラインSVG。favicon 404 のコンソールエラー防止） -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='5' width='12' height='9' rx='1' fill='%232f6fd0'/%3E%3Ccircle cx='8' cy='9' r='3' fill='%237fb2ff'/%3E%3Crect x='7' y='1' width='2' height='6' fill='%237fb2ff'/%3E%3C/svg%3E">
@@ -17,14 +20,41 @@
     font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
     color: #9aa4b8;
     user-select: none;
+    /* タッチ操作中にページがスクロール・引っ張り更新しないようにする（照準ドラッグが奪われるため） */
+    touch-action: none;
+    overscroll-behavior: none;
   }
-  .hint { margin-top: 10px; font-size: 13px; letter-spacing: 0.05em; }
+  /* Phaser の FIT 拡大は「親要素の大きさ」に合わせる。親に大きさを与えないと
+     expandParent がゲームの基準サイズ（800px）まで親を広げてしまい、
+     狭い画面では canvas が画面外へはみ出す。ビューポート全体を親にする。 */
+  #app {
+    width: 100vw;
+    height: 100vh;
+  }
+  /* 操作説明はゲーム画面（Phaser）側が場面に応じて出す。ここに固定文を置くと
+     エディタ画面では誤情報になり、狭いウィンドウでは盤面を画面外へ押し出してしまう。
+     案内は position: fixed にしてレイアウトの高さを奪わせない。 */
+  .hint {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 6px;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    text-align: center;
+    padding: 0 12px;
+    pointer-events: none;
+  }
+  /* 盤面は横長（25×17タイル）なので、縦持ちだと大半が余白になる。縦持ちのときだけ案内する。 */
+  #rotate-hint { display: none; }
+  @media (hover: none) and (orientation: portrait) {
+    #rotate-hint { display: block; }
+  }
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div class="hint">WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ スペース・右クリック: 地雷 ／ Esc・P: ポーズ ／ R: リスタート ／ M: ミュート ／ B: BGM</div>
-<div class="hint">スマホ: 画面左半分で移動（仮想スティック）／右半分をタッチで照準・連射／右下ボタンで地雷</div>
+<div class="hint" id="rotate-hint">📱 横向きにすると画面が大きくなります</div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

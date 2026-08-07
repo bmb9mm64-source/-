@@ -15,9 +15,10 @@ import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
-import type { Bullet } from "../core/bullet";
+import { type Bullet, liveBulletCount } from "../core/bullet";
 import { ENEMY_DEFS } from "../core/enemyRegistry";
 import { eightWayAngle, type PlayerInput } from "../core/input";
+import { liveMineCount } from "../core/mine";
 import { missileShape } from "../core/missileShape";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
@@ -37,6 +38,24 @@ const MONO_FONT = '"Consolas", "Menlo", "Courier New", monospace';
 
 /** 噴射炎の明滅位相を弾ごとにずらす係数（座標に掛ける。全弾が同時に点滅しないようにするだけ） */
 const MISSILE_PHASE_SCATTER = 0.1;
+
+/**
+ * ポーズ中に見せる操作一覧（GDD §8 v0.17）。
+ * プレイ中に操作を確認できる場所が画面内に無かったため、ポーズ画面をその置き場にする。
+ * タイトル画面と同じく入力環境で出し分ける（押せないキーを並べても迷わせるだけなので）。
+ */
+function pauseHelp(): string {
+  const touchOnly =
+    typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches;
+  return touchOnly
+    ? "右上のポーズボタンで再開\n\n左半分をなぞって移動 ／ 右半分をタッチして照準・連射\n右下のボタンで地雷"
+    : "Esc / P で再開\u3000\u3000T でタイトルへ\u3000\u3000R でやり直し\n\n" +
+        "WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃\n" +
+        "スペース・右クリック: 地雷 ／ M: 消音 ／ B: BGM";
+}
+
+/** オーバーレイの版組（文の長さで置き方を変える。GDD §8・§8.5） */
+type OverlayLayout = "normal" | "paused" | "allclear";
 
 /** 爆発フラッシュ演出（見た目のみ。fromRadius→toRadius へ拡大しながらフェードアウト） */
 interface ExplosionFx {
@@ -116,9 +135,12 @@ export class GameScene extends Phaser.Scene {
   private overlayGfx!: Phaser.GameObjects.Graphics;
   private overlayTitle!: Phaser.GameObjects.Text;
   private overlaySub!: Phaser.GameObjects.Text;
-  // オーバーレイの現在のレイアウト・色（同じ値の再設定＝無駄な Text 再描画を避けるための記憶）
-  private overlayLayoutIsAllClear: boolean | null = null;
+  // オーバーレイの現在の版組・色（同じ値の再設定＝無駄な Text 再描画を避けるための記憶）
+  private overlayLayout: OverlayLayout | null = null;
   private overlaySubColor = "";
+  private readonly pauseHelpText = pauseHelp(); // ポーズ中の操作一覧（入力環境で内容が変わる）
+  private hudAmmo1!: Phaser.GameObjects.Text; // 1P の残弾・残地雷（GDD §8 v0.17）
+  private hudAmmo2!: Phaser.GameObjects.Text; // 2P の残弾・残地雷（2人プレイ時のみ）
 
   constructor() {
     super({ key: "GameScene" });
@@ -200,6 +222,13 @@ export class GameScene extends Phaser.Scene {
       .text(w / 2, 16, "", { ...hudStyle, fontFamily: MONO_FONT })
       .setOrigin(0.5, 0.5)
       .setDepth(5);
+    // 残弾・残地雷（盤面の下外周に重ねる。同時5発・地雷2個の駆け引きを可視化する。GDD §8 v0.17）
+    const ammoStyle = { ...hudStyle, fontSize: "14px" };
+    this.hudAmmo1 = this.add.text(10, h - 16, "", ammoStyle).setOrigin(0, 0.5).setDepth(5);
+    this.hudAmmo2 = this.add
+      .text(w - 10, h - 16, "", { ...ammoStyle, color: COLORS.P2_CSS })
+      .setOrigin(1, 0.5)
+      .setDepth(5);
 
     // --- オーバーレイ（バナー・ポーズ・ゲームオーバー・全クリア） ---
     this.overlayGfx = this.add.graphics().setDepth(10).setVisible(false);
@@ -268,6 +297,12 @@ export class GameScene extends Phaser.Scene {
       SFX.unlock();
       if (this.handleEndScreenInput()) return;
       this.restartRun(); // プレイ中の R はランのやり直し（M1 から）
+    });
+    // T：タイトルへ戻る（GDD §8 v0.17。従来はゲーム中にタイトルへ戻る手段が無かった）。
+    // テストプレイ中は「戻る先」がエディタなのでそちらへ返す（GDD §12.7）
+    onKeyPress("T", () => {
+      SFX.unlock();
+      this.scene.start(this.customPlay ? "EditorScene" : "TitleScene");
     });
     // スペース：1P 地雷設置（1押下1設置）
     onKeyPress("SPACE", () => {
@@ -625,6 +660,22 @@ export class GameScene extends Phaser.Scene {
   /** 戦車1台の描画（車体矩形＋キャタピラ＋砲塔円＋砲身矩形） */
   /** シールダーの盾（守っている角度の弧）を描く。跳弾で背後を狙う判断材料になる（GDD §6 v0.14） */
   /**
+   * 残弾・残地雷の表示文字列（●＝いま使える／○＝場に出ていて使えない）。
+   * 上限はプレイヤーごとに独立（GDD §12.5）なので owner 単位で数える。
+   */
+  private ammoText(index: number): string {
+    const p = this.world.players[index];
+    if (!p) return "";
+    const label = this.playerCount === 2 ? `P${index + 1} ` : "";
+    if (!p.alive) return `${label}—`; // 退場中は残量を出さない
+    const pips = (used: number, max: number): string =>
+      "●".repeat(Math.max(0, max - used)) + "○".repeat(Math.min(used, max));
+    const bullets = liveBulletCount(this.world.bullets, p);
+    const mines = liveMineCount(this.world.mines, p);
+    return `${label}弾 ${pips(bullets, BALANCE.PLAYER.MAX_BULLETS)}　地雷 ${pips(mines, BALANCE.MINE.MAX_PER_OWNER)}`;
+  }
+
+  /**
    * 終了画面（全クリア／ゲームオーバー）での再開操作。処理したら true。
    * R キーとクリックの両方から呼ぶ（同じ分岐を2か所に書かないため）。
    */
@@ -795,6 +846,9 @@ export class GameScene extends Phaser.Scene {
     this.hudRight.setText(`撃破: ${world.kills}　敵: ${world.enemiesLeft()}${SFX.muted ? "　[消音]" : ""}`);
     // 現ミッションの経過タイム（0.1秒単位。固定幅にそろえて桁ブレを防ぐ。GDD §8.5）
     this.hudTime.setText(`TIME ${formatTime(world.missionTime).padStart(6, " ")}`);
+    // 残弾・残地雷（●＝撃てる／○＝場に出ていて撃てない。GDD §8 v0.17）
+    this.hudAmmo1.setText(this.ammoText(0));
+    this.hudAmmo2.setText(this.playerCount === 2 ? this.ammoText(1) : "");
 
     // オーバーレイ
     const h = BALANCE.TILE * BALANCE.ROWS;
@@ -803,7 +857,7 @@ export class GameScene extends Phaser.Scene {
     let subColor: string = COLORS.HUD_CSS;
     if (this.paused) {
       title = "PAUSED";
-      sub = "Esc / P で再開";
+      sub = this.pauseHelpText; // プレイ中に操作を確認できる唯一の場所（GDD §8 v0.17）
     } else if (world.status === "banner") {
       if (this.clearFx) {
         // ミッションクリア演出：タイム＋ベスト更新なら NEW RECORD!（GDD §8.5）
@@ -828,14 +882,20 @@ export class GameScene extends Phaser.Scene {
           "R またはクリックでタイトルへ";
     }
     const showOverlay = title !== "";
-    // 全クリア画面はタイム一覧が長いため上寄せ・等幅小フォントに切り替える（GDD §8.5）。
+    // オーバーレイの版組は3種類（GDD §8.5・§8 v0.17）：
+    //   allclear … タイム一覧が最大52行になるので上寄せ・等幅小フォント
+    //   paused   … 操作一覧が複数行なので、中央寄せだとタイトルに食い込む。見出しの下へ上寄せする
+    //   normal   … 1行の短い文なので従来どおり中央寄せ
     // setFontSize/setLineSpacing/setColor は Phaser 側に「同じ値なら無視」の判定がなく、
-    // 呼ぶたびに Text の再描画＋テクスチャ再アップロードが走る（全クリア画面は最大52行）。
-    // そのためレイアウト・色は**変わったフレームだけ**適用する。
-    const isAllClearScreen = !this.paused && world.status === "allclear";
-    if (isAllClearScreen !== this.overlayLayoutIsAllClear) {
-      this.overlayLayoutIsAllClear = isAllClearScreen;
-      if (isAllClearScreen) {
+    // 呼ぶたびに Text の再描画＋テクスチャ再アップロードが走るため、変わったフレームだけ適用する。
+    const layout: OverlayLayout = this.paused
+      ? "paused"
+      : world.status === "allclear"
+        ? "allclear"
+        : "normal";
+    if (layout !== this.overlayLayout) {
+      this.overlayLayout = layout;
+      if (layout === "allclear") {
         this.overlayTitle.setY(64);
         this.overlaySub
           .setY(104)
@@ -843,6 +903,14 @@ export class GameScene extends Phaser.Scene {
           .setFontFamily(MONO_FONT)
           .setFontSize(15)
           .setLineSpacing(5);
+      } else if (layout === "paused") {
+        this.overlayTitle.setY(h / 2 - 60);
+        this.overlaySub
+          .setY(h / 2 - 20)
+          .setOrigin(0.5, 0)
+          .setFontFamily("sans-serif")
+          .setFontSize(16)
+          .setLineSpacing(6);
       } else {
         this.overlayTitle.setY(h / 2 - 18);
         this.overlaySub
@@ -866,10 +934,12 @@ export class GameScene extends Phaser.Scene {
 
     // 十字カーソル（照準位置。タッチ中はタッチ点、それ以外はマウス。オーバーレイより前面）
     const gfx = this.crosshairGfx;
+    gfx.clear();
+    // オーバーレイ表示中（ポーズ・バナー・終了画面）は隠す。文字に重なって読めなくなるため（GDD §8 v0.17）
+    if (this.paused || this.world.status !== "playing") return;
     const aim = this.lastTouch?.aim;
     const x = aim ? aim.x : pointer.x;
     const y = aim ? aim.y : pointer.y;
-    gfx.clear();
     gfx.lineStyle(1.5, COLORS.CROSSHAIR, 1);
     gfx.beginPath();
     gfx.moveTo(x - 10, y);
