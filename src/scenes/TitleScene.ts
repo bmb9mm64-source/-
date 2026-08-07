@@ -5,6 +5,7 @@
  * 描画はすべてコード描画（外部アセット禁止・オリジナル配色）。
  */
 import Phaser from "phaser";
+import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import {
@@ -86,7 +87,8 @@ export class TitleScene extends Phaser.Scene {
         "【1P】WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃 ／ スペース・右クリック: 地雷\n" +
           "【2P】パッド: 左スティック移動・右スティック照準・RB射撃・LB地雷\n" +
           "　　　（パッド未接続時: 矢印キー移動・IJKL照準・Enter射撃・右Shift地雷）\n" +
-          "共通: Esc・P: ポーズ ／ R: リスタート ／ M: 消音",
+          "【スマホ】左半分で移動 ／ 右半分をタッチで照準・連射 ／ 右下ボタンで地雷\n" +
+          "共通: Esc・P: ポーズ ／ R: リスタート ／ M: 消音 ／ B: BGM",
         { ...textStyle, fontSize: "14px", align: "center", lineSpacing: 6 },
       )
       .setOrigin(0.5);
@@ -126,6 +128,15 @@ export class TitleScene extends Phaser.Scene {
     this.refreshDifficultyUi();
 
     // モード選択（クリックまたは 1 / 2 キー）
+    // 最初のユーザー操作で音を初期化し、タイトルBGMを鳴らす（自動再生制限対策。GDD §9 v0.11）
+    const startAudio = (): void => {
+      SFX.unlock();
+      BGM.play("title");
+    };
+    this.input.on("pointerdown", startAudio);
+    this.input.keyboard?.on("keydown", startAudio);
+    BGM.play("title"); // 既に初期化済み（別シーンから戻ってきた場合）なら即座に切り替わる
+
     const start = (playerCount: number): void => {
       SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）
       this.scene.start("GameScene", { playerCount });

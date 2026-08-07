@@ -9,6 +9,7 @@
  * - 書き出し/読み込みは prompt()（コピペ共有。GDD §12.7）。
  */
 import Phaser from "phaser";
+import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import {
@@ -95,8 +96,10 @@ export class EditorScene extends Phaser.Scene {
     };
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       SFX.unlock();
+      BGM.play("editor"); // エディタは静かな曲（GDD §9 v0.11）
       paint(p);
     });
+    BGM.play("editor");
     this.input.on("pointermove", paint);
 
     // --- 上バー：タイルパレット（外周 row0 に重ねる） ---

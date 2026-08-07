@@ -11,6 +11,7 @@
  *   入力はすべて core の PlayerInput 型に正規化して GameWorld に渡す。
  */
 import Phaser from "phaser";
+import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
@@ -19,6 +20,13 @@ import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
+import {
+  mineButtonRect,
+  pauseButtonRect,
+  TouchController,
+  type TouchPointInput,
+  type TouchResolved,
+} from "../core/touch";
 import { ALL_MISSIONS } from "../stages/allMissions";
 
 /** タイム表示用の等幅フォント（tabular＝桁幅が揃う描画にして桁ブレを防ぐ） */
@@ -60,6 +68,10 @@ export class GameScene extends Phaser.Scene {
   private fireRequested = false; // 1P：1クリック1発の発射要求フラグ
   private fireBuffer1 = 0; // 1P：射撃の先行入力バッファ残り時間 [s]（GDD §3 v0.10）
   private fireBuffer2 = 0; // 2P：同上（キーボード/パッド共通）
+  private touch = new TouchController(); // タッチ操作（GDD §3.5 v0.11）
+  private touchMode = false; // タッチ入力を検知したら true（以後、仮想コントロールを表示）
+  private touchGfx!: Phaser.GameObjects.Graphics; // 仮想スティック・ボタンの描画
+  private lastTouch: TouchResolved | null = null; // 直近フレームのタッチ解決結果（描画用）
   private mineRequested = false; // 1P：1押下1設置の地雷要求フラグ
   private fire2Requested = false; // 2P（キーボード Enter）
   private mine2Requested = false; // 2P（キーボード 右Shift）
@@ -129,6 +141,11 @@ export class GameScene extends Phaser.Scene {
     this.fireBuffer1 = 0;
     this.fireBuffer2 = 0;
     this.gamepad = new GamepadPoller();
+    this.touch.reset();
+    this.touchMode = false;
+    this.lastTouch = null;
+    this.input.addPointer(BALANCE.TOUCH.MAX_POINTERS - 1); // マルチタッチ（移動＋照準＋ボタン）
+    BGM.play("game"); // AudioContext 未初期化なら無音（後述の unlock 時に鳴り始める）
     this.explosionsFx = [];
     this.particles = [];
     this.lastStageVersion = -1;
@@ -146,6 +163,7 @@ export class GameScene extends Phaser.Scene {
     // --- 動的レイヤー ---
     this.dynGfx = this.add.graphics().setDepth(1);
     this.crosshairGfx = this.add.graphics().setDepth(20);
+    this.touchGfx = this.add.graphics().setDepth(15); // 仮想コントロール（HUD より下・十字より下）
 
     // --- HUD（ミッション番号・残機・撃破数＋2P 時は P1/P2 の生存状態。GDD §8・§12.5） ---
     const hudStyle = {
@@ -246,11 +264,25 @@ export class GameScene extends Phaser.Scene {
       SFX.unlock();
       this.mine2Requested = true;
     });
-    // M：効果音のミュート切替
+    // M：効果音とBGMのミュート切替（共通。GDD §9 v0.11）
     kb.on("keydown-M", () => {
       SFX.unlock();
-      SFX.toggleMute();
+      const muted = SFX.toggleMute();
+      BGM.setMuted(muted);
+      if (!muted) BGM.play("game");
     });
+    // B：BGM だけのミュート切替（GDD §9 v0.11）
+    kb.on("keydown-B", () => {
+      SFX.unlock();
+      if (!BGM.toggleMute()) BGM.play("game");
+    });
+    // 最初のユーザー操作で音を初期化して BGM を鳴らし始める（ブラウザの自動再生制限対策）
+    const startAudio = (): void => {
+      SFX.unlock();
+      BGM.play("game");
+    };
+    kb.on("keydown", startAudio);
+    this.input.on("pointerdown", startAudio);
 
     // クリック：1P 射撃（左）／地雷（右）。終了画面では再開操作
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
@@ -270,11 +302,70 @@ export class GameScene extends Phaser.Scene {
         this.scene.start("TitleScene");
         return;
       }
+      // タッチは TouchController が扱う（仮想スティック・ボタンと二重に反応させない）
+      if (pointer.wasTouch) {
+        this.touchMode = true;
+        return;
+      }
       if (pointer.button === 0) {
         this.fireRequested = true;
         this.fireBuffer1 = BALANCE.PLAYER.FIRE_BUFFER; // クールダウン中でも短時間予約（先行入力。GDD §3 v0.10）
       } else if (pointer.button === 2) this.mineRequested = true;
     });
+  }
+
+  /**
+   * タッチ入力を解決する（GDD §3.5 v0.11）。
+   * タッチを未検知（PC）なら null を返し、従来の操作・描画に一切影響しない。
+   * 座標は pointer.x/y（ゲーム内座標）を使う：カメラ揺れの影響を受けず、Scale.FIT の拡大も加味済み。
+   */
+  private resolveTouch(): TouchResolved | null {
+    const points: TouchPointInput[] = [];
+    for (const p of this.input.manager.pointers) {
+      if (!p.isDown || !p.wasTouch) continue;
+      this.touchMode = true;
+      points.push({ id: p.id, x: p.x, y: p.y, startX: p.downX, startY: p.downY });
+    }
+    if (!this.touchMode) return null;
+    const w = BALANCE.TILE * BALANCE.COLS;
+    const h = BALANCE.TILE * BALANCE.ROWS;
+    this.lastTouch = this.touch.resolve(points, w, h);
+    return this.lastTouch;
+  }
+
+  /** 仮想コントロール（スティック・地雷ボタン・ポーズボタン）を描く。タッチ検知時のみ */
+  private drawTouchUi(): void {
+    const g = this.touchGfx;
+    g.clear();
+    if (!this.touchMode) return;
+    const c = BALANCE.TOUCH;
+    const w = BALANCE.TILE * BALANCE.COLS;
+    const h = BALANCE.TILE * BALANCE.ROWS;
+
+    // 地雷・ポーズボタン（常時表示。押しやすさのため大きめ）
+    const mine = mineButtonRect(w, h);
+    g.fillStyle(COLORS.MINE, c.UI_ALPHA);
+    g.fillRoundedRect(mine.x, mine.y, mine.w, mine.h, 12);
+    g.lineStyle(2, COLORS.MINE_LAMP, c.UI_ALPHA + 0.25);
+    g.strokeRoundedRect(mine.x, mine.y, mine.w, mine.h, 12);
+    g.fillStyle(COLORS.MINE_LAMP, c.UI_ALPHA + 0.3);
+    g.fillCircle(mine.x + mine.w / 2, mine.y + mine.h / 2, 13);
+
+    const pause = pauseButtonRect(w, h);
+    g.fillStyle(COLORS.WALL, c.UI_ALPHA);
+    g.fillRoundedRect(pause.x, pause.y, pause.w, pause.h, 8);
+    g.fillStyle(COLORS.CROSSHAIR, c.UI_ALPHA + 0.3);
+    g.fillRect(pause.x + pause.w * 0.32, pause.y + pause.h * 0.28, 5, pause.h * 0.44);
+    g.fillRect(pause.x + pause.w * 0.55, pause.y + pause.h * 0.28, 5, pause.h * 0.44);
+
+    // 仮想スティック（指を置いている間だけ、その位置に出す）
+    const stick = this.lastTouch?.stick;
+    if (stick) {
+      g.lineStyle(2, COLORS.CROSSHAIR, c.UI_ALPHA);
+      g.strokeCircle(stick.baseX, stick.baseY, c.STICK_MAX_RADIUS);
+      g.fillStyle(COLORS.PLAYER_TURRET, c.UI_ALPHA + 0.2);
+      g.fillCircle(stick.tipX, stick.tipY, 22);
+    }
   }
 
   /** 2P の入力を構築（パッド優先＋キーボード分割フォールバック。毎フレーム接続確認。GDD §12.5） */
@@ -306,13 +397,21 @@ export class GameScene extends Phaser.Scene {
     const dt = Math.min(deltaMs / 1000, BALANCE.DT_MAX);
     const pointer = this.input.activePointer;
 
+    // タッチ操作の解決（GDD §3.5）。仮想スティック・照準・ボタンをキーボード入力に上書き合成する
+    const touch = this.resolveTouch();
+    if (touch?.pausePressed && this.world.status === "playing") this.paused = !this.paused;
+
     if (!this.paused) {
+      const keyX = (this.keys.d.isDown ? 1 : 0) - (this.keys.a.isDown ? 1 : 0);
+      const keyY = (this.keys.s.isDown ? 1 : 0) - (this.keys.w.isDown ? 1 : 0);
       const input1: PlayerInput = {
-        moveX: (this.keys.d.isDown ? 1 : 0) - (this.keys.a.isDown ? 1 : 0),
-        moveY: (this.keys.s.isDown ? 1 : 0) - (this.keys.w.isDown ? 1 : 0),
-        aim: { mode: "cursor", x: pointer.worldX, y: pointer.worldY },
-        fire: this.fireRequested || this.fireBuffer1 > 0, // 先行入力バッファ（GDD §3 v0.10）
-        placeMine: this.mineRequested,
+        moveX: touch && (touch.moveX !== 0 || touch.moveY !== 0) ? touch.moveX : keyX,
+        moveY: touch && (touch.moveX !== 0 || touch.moveY !== 0) ? touch.moveY : keyY,
+        aim: touch?.aim
+          ? { mode: "cursor", x: touch.aim.x, y: touch.aim.y }
+          : { mode: "cursor", x: pointer.worldX, y: pointer.worldY },
+        fire: this.fireRequested || this.fireBuffer1 > 0 || (touch?.fire ?? false), // 先行入力バッファ（GDD §3 v0.10）
+        placeMine: this.mineRequested || (touch?.minePressed ?? false),
       };
       const inputs: PlayerInput[] = [input1];
       if (this.playerCount === 2) {
@@ -692,10 +791,14 @@ export class GameScene extends Phaser.Scene {
     this.overlayTitle.setVisible(showOverlay).setText(title);
     this.overlaySub.setVisible(showOverlay).setText(sub).setColor(subColor);
 
-    // 十字カーソル（1P マウス照準。オーバーレイより前面）
+    // 仮想コントロール（タッチ検知時のみ。GDD §3.5）
+    this.drawTouchUi();
+
+    // 十字カーソル（照準位置。タッチ中はタッチ点、それ以外はマウス。オーバーレイより前面）
     const gfx = this.crosshairGfx;
-    const x = pointer.worldX;
-    const y = pointer.worldY;
+    const aim = this.lastTouch?.aim;
+    const x = aim ? aim.x : pointer.worldX;
+    const y = aim ? aim.y : pointer.worldY;
     gfx.clear();
     gfx.lineStyle(1.5, COLORS.CROSSHAIR, 1);
     gfx.beginPath();

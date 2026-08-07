@@ -48,6 +48,14 @@ class SfxEngine {
     return this.muted;
   }
 
+  /**
+   * BGM など他モジュールが同じ AudioContext を共有するためのアクセサ。
+   * （未初期化なら null。BGM は自前の GainNode を destination へつなぐ）
+   */
+  audioContext(): AudioContext | null {
+    return this.ctx;
+  }
+
   /** 発音可能なら出力先を返す（未初期化・ミュート時は null） */
   private out(): { ctx: AudioContext; master: GainNode } | null {
     if (!this.ctx || !this.master || this.muted) return null;

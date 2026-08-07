@@ -22,6 +22,18 @@ export const BALANCE = {
     TURRET_TURN_SPEED_KEYS: (540 * Math.PI) / 180, // 2P キーボード照準（IJKL）時の砲塔回転追従速度 [rad/s]（GDD §12.5「押した方向へ回転追従」。速度は本ファイルの調整値）
   },
 
+  TOUCH: {
+    // タッチ操作（GDD §3.5 v0.11）。座標はゲーム内座標（論理解像度 800×544）
+    STICK_DEADZONE: 12, // 仮想スティックの不感帯 [px]（この距離未満は移動しない）
+    STICK_MAX_RADIUS: 64, // 最大入力とみなす基点からの距離 [px]
+    BUTTON_SIZE: 76, // 地雷ボタンの一辺 [px]（指で押しやすい大きさ）
+    PAUSE_SIZE: 44, // ポーズボタンの一辺 [px]
+    BUTTON_MARGIN: 14, // 画面端からの余白 [px]
+    HUD_HEIGHT: 32, // HUD 帯の高さ [px]（ポーズボタンを HUD の下に置くため）
+    UI_ALPHA: 0.28, // 仮想コントロールの不透明度（プレイの邪魔をしない薄さ）
+    MAX_POINTERS: 3, // 同時に扱う指の数（移動＋照準＋ボタン）
+  },
+
   INPUT: {
     // 2P ゲームパッド入力（GDD §12.5。Gamepad API＝ブラウザのコントローラ対応機能）
     GAMEPAD_DEADZONE: 0.25, // スティックのデッドゾーン（中央付近の遊び。傾き量がこの値未満は入力なし扱い）
@@ -219,6 +231,28 @@ export const BALANCE = {
     MINE_EXPLODE: 0.85,
     CLEAR: 0.5,
     GAMEOVER: 0.5,
+    BGM_MASTER: 0.11, // BGM の音量（効果音より小さくしてプレイの邪魔をしない。GDD §9 v0.11）
+  },
+
+  BGM: {
+    // 自作合成ループ（GDD §9 v0.11）。マイナー・ペンタトニック（暗く緊張感のある5音階）
+    SCALE: [220.0, 261.63, 293.66, 329.63, 392.0], // A3 C4 D4 E4 G4
+    BASS_OCTAVE: 0.25, // ベースは基音の 1/4（2オクターブ下）
+    STEPS_PER_BAR: 8, // 1小節あたりのステップ数（8分音符）
+    SCHEDULE_AHEAD: 0.25, // 先読みして予約する時間 [s]
+    TICK_MS: 40, // スケジューラの起動間隔 [ms]
+    NOTE_DUR: 0.16, // アルペジオ1音の長さ [s]
+    BASS_DUR: 0.5, // ベース1音の長さ [s]
+    HAT_DUR: 0.03, // ハイハット（ノイズ）の長さ [s]
+    ARP_VOL: 0.5, // 各パートの相対音量（BGM_MASTER に対する比）
+    BASS_VOL: 0.85,
+    HAT_VOL: 0.28,
+    TRACKS: {
+      // シーンごとの曲調（GDD §9 v0.11）
+      title: { TEMPO: 88, PATTERN: [0, 2, 4, 2, 3, 2, 1, 2], BASS: [0, 0, 3, 3], HAT: false },
+      game: { TEMPO: 116, PATTERN: [0, 3, 2, 4, 1, 4, 2, 3], BASS: [0, 0, 2, 4], HAT: true },
+      editor: { TEMPO: 76, PATTERN: [0, -1, 2, -1, 3, -1, 1, -1], BASS: [0, 0, 0, 3], HAT: false },
+    },
   },
 
   FX: {
