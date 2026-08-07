@@ -18,13 +18,18 @@ export function hasLineOfSight(
   const dy = y1 - y0;
   const dist = Math.hypot(dx, dy);
   const steps = Math.max(1, Math.ceil(dist / step));
+  // サンプル間隔（6px）はタイル（32px）より細かいので、連続するサンプルの大半は同じタイルを指す。
+  // 直前に調べたタイルを覚えて再判定を省く（サンプル位置も判定結果も従来と完全に同一）。
+  let prevCol = -1;
+  let prevRow = -1;
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    const x = x0 + dx * t;
-    const y = y0 + dy * t;
-    if (stopsBullet(tileAt(stage, Math.floor(x / stage.tile), Math.floor(y / stage.tile)))) {
-      return false;
-    }
+    const col = Math.floor((x0 + dx * t) / stage.tile);
+    const row = Math.floor((y0 + dy * t) / stage.tile);
+    if (col === prevCol && row === prevRow) continue;
+    prevCol = col;
+    prevRow = row;
+    if (stopsBullet(tileAt(stage, col, row))) return false;
   }
   return true;
 }

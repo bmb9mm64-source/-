@@ -1,6 +1,6 @@
 /**
  * 敵D「マインレイヤー」（地雷敷設型）のAI（GDD §6 v0.6）。
- * 移動・射撃は敵B「ローバー」の WANDER と同方式（構造の再利用）。差分：
+ * 移動・射撃は敵B「ローバー」の WANDER と同方式（手順は enemyAi.ts に集約）。差分：
  *   - 移動 70px/s・照準 120°/s・発射間隔 平均 2.5±1.0 s（弾はローバーと同じ 225px/s・反射1回・同時1発）
  *   - プレイヤー弾への回避行動は**なし**（状態は WANDER のみ＝状態変数を持たない）
  *   - 地雷敷設：自分が敷設した生存地雷が同時3個まで。敷設間隔 平均 5.0±2.0 s。
@@ -14,15 +14,21 @@
  * Phaser 非依存の純粋 TS。乱数は Rng を注入して決定的テスト可能。
  */
 import { BALANCE } from "../config/balance";
-import { type Bullet, ENEMY_BULLET_CFG, liveBulletCount, scaleBulletSpeed, spawnBullet } from "./bullet";
+import { type Bullet, ENEMY_BULLET_CFG, scaleBulletSpeed } from "./bullet";
 import { type DifficultyMods, NORMAL_MODS } from "./difficulty";
-import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
+import {
+  createEnemyBody,
+  type MoveState,
+  rollFireInterval,
+  stepToTarget,
+  tryEnemyFire,
+} from "./enemyAi";
+import { randRange, type Rng, rotateToward } from "./mathUtils";
 import { type Mine, type MineConfig, tryPlaceMine } from "./mine";
 import { pickWanderTarget } from "./rover";
 import type { ParsedStage } from "./stage";
-import { moveTank, type TankBlocker } from "./tank";
-import { selectTarget, type TargetInfo } from "./targeting";
-import type { TankBody, Vec2 } from "./types";
+import type { TankBlocker } from "./tank";
+import { nearestAlive, selectTarget, type TargetInfo } from "./targeting";
 
 /**
  * 敵Dの地雷設定：挙動（起爆・誘爆・爆風・設置者除外）はプレイヤー地雷と同一で、
@@ -34,19 +40,15 @@ export const MINELAYER_MINE_CFG: MineConfig = {
 };
 
 /** マインレイヤー戦車 */
-export interface MinelayerTank extends TankBody {
+export interface MinelayerTank extends MoveState {
   kind: "minelayer";
   fireTimer: number; // 次に撃てるまでの残り時間 [s]
   mineTimer: number; // 次に地雷を敷設できるまでの残り時間 [s]（0 のまま条件成立を待つ）
-  target: Vec2; // 現在の移動目標点（px）
-  retargetTimer: number; // 目標を引き直すまでの残り時間 [s]
-  stuckTimer: number; // 行き詰まり（壁・戦車）継続時間 [s]
 }
 
 /** 次回発射間隔（平均±ゆらぎ）×難易度倍率 を引く（GDD §8.3。敷設間隔は「発射」でないため対象外） */
 export function minelayerNextFireInterval(rng: Rng, intervalMult = 1): number {
-  const c = BALANCE.MINELAYER;
-  return (c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR)) * intervalMult;
+  return rollFireInterval(rng, BALANCE.MINELAYER, intervalMult);
 }
 
 /** 次回敷設間隔（平均±ゆらぎ）を引く */
@@ -63,15 +65,8 @@ export function createMinelayer(
   mods: DifficultyMods = NORMAL_MODS,
 ): MinelayerTank {
   return {
-    kind: "minelayer",
-    x,
-    y,
-    bodyAngle: Math.PI / 2,
-    turretAngle: Math.PI / 2,
-    half: BALANCE.MINELAYER.SIZE / 2,
-    radius: BALANCE.MINELAYER.RADIUS,
-    alive: true,
-    fireTimer: minelayerNextFireInterval(rng, mods.fireIntervalMult),
+    ...createEnemyBody("minelayer", x, y, BALANCE.MINELAYER),
+    fireTimer: rollFireInterval(rng, BALANCE.MINELAYER, mods.fireIntervalMult),
     mineTimer: minelayerNextMineInterval(rng),
     target: { x, y },
     retargetTimer: 0,
@@ -91,21 +86,15 @@ export interface MinelayerUpdateContext {
   mods?: DifficultyMods; // 難易度の実効調整値（省略時は NORMAL 相当。GDD §8.3）
 }
 
-/** 全生存プレイヤーが safeDist 以上離れているか（生存者がいなければ false＝敷設しない） */
+/** 最寄りの生存プレイヤーが safeDist 以上離れているか（生存者がいなければ false＝敷設しない） */
 function playersFarEnough(
   e: MinelayerTank,
   players: readonly TargetInfo[],
   safeDist: number,
 ): boolean {
-  let anyAlive = false;
-  for (const p of players) {
-    if (!p.alive) continue;
-    anyAlive = true;
-    const dx = p.x - e.x;
-    const dy = p.y - e.y;
-    if (dx * dx + dy * dy < safeDist * safeDist) return false; // 最寄りが 160px 未満
-  }
-  return anyAlive;
+  const nearest = nearestAlive(e.x, e.y, players);
+  if (!nearest) return false;
+  return (nearest.x - e.x) ** 2 + (nearest.y - e.y) ** 2 >= safeDist * safeDist;
 }
 
 /** マインレイヤーの更新（1フレーム分。dt は秒） */
@@ -121,34 +110,9 @@ export function updateMinelayer(e: MinelayerTank, dt: number, ctx: MinelayerUpda
   if (pick) e.turretAngle = rotateToward(e.turretAngle, toPlayer, c.TURN_SPEED * dt);
 
   // --- 徘徊移動（ローバーの WANDER と同方式。回避行動はなし：GDD §6 v0.6） ---
-  e.retargetTimer -= dt;
-  const distToTarget = Math.hypot(e.target.x - e.x, e.target.y - e.y);
-  if (e.retargetTimer <= 0 || distToTarget < c.ARRIVE_DIST) {
-    e.target = pickWanderTarget(ctx.stage, ctx.rng, e, c.WANDER_PICK_TRIES);
-    e.retargetTimer = randRange(ctx.rng, c.RETARGET_INTERVAL_MIN, c.RETARGET_INTERVAL_MAX);
-  }
-  const dx = e.target.x - e.x;
-  const dy = e.target.y - e.y;
-  const dist = Math.hypot(dx, dy);
-  if (dist > c.ARRIVE_DIST) {
-    const step = Math.min(c.SPEED * dt, dist);
-    const prevX = e.x;
-    const prevY = e.y;
-    moveTank(e, (dx / dist) * step, (dy / dist) * step, ctx.blockers, ctx.stage);
-    e.bodyAngle = rotateToward(e.bodyAngle, Math.atan2(dy, dx), c.BODY_TURN_SPEED * dt);
-    // 壁・他戦車に阻まれてほとんど進めない状態が続いたら目標を引き直す
-    const moved = Math.hypot(e.x - prevX, e.y - prevY);
-    if (moved < step * 0.5) {
-      e.stuckTimer += dt;
-      if (e.stuckTimer >= c.STUCK_TIME) {
-        e.target = pickWanderTarget(ctx.stage, ctx.rng, e, c.WANDER_PICK_TRIES);
-        e.retargetTimer = randRange(ctx.rng, c.RETARGET_INTERVAL_MIN, c.RETARGET_INTERVAL_MAX);
-        e.stuckTimer = 0;
-      }
-    } else {
-      e.stuckTimer = 0;
-    }
-  }
+  stepToTarget(e, dt, c, ctx.blockers, ctx.stage, ctx.rng, () =>
+    pickWanderTarget(ctx.stage, ctx.rng, e, c.WANDER_PICK_TRIES),
+  );
 
   // --- 地雷敷設（GDD §6 v0.6）：間隔消化済み・生存地雷3個未満・最寄り生存プレイヤーが160px以上 ---
   e.mineTimer -= dt;
@@ -160,19 +124,15 @@ export function updateMinelayer(e: MinelayerTank, dt: number, ctx: MinelayerUpda
     }
   }
 
-  // --- 射撃（ローバーと同条件。GDD §6 v0.6） ---
-  e.fireTimer -= dt;
-  if (e.fireTimer < 0) e.fireTimer = 0;
-  const ready =
-    ctx.grace <= 0 && // 開幕グレース明け
-    e.fireTimer <= 0 && // 発射間隔を消化済み
-    liveBulletCount(ctx.bullets, e) < c.MAX_BULLETS && // 同時1発
-    pick !== null &&
-    pick.hasLos && // 標的への射線が通っている（全員遮蔽なら照準追従のみ。GDD §12.5）
-    Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL; // 砲塔がほぼ狙い通り
-  if (ready) {
-    // 225px/s ×難易度弾速倍率（GDD §6 v0.6・§8.3）
-    spawnBullet(ctx.bullets, e, e.turretAngle, scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult), ctx.stage);
-    e.fireTimer = minelayerNextFireInterval(ctx.rng, mods.fireIntervalMult);
-  }
+  // --- 射撃（ローバーと同条件。GDD §6 v0.6。225px/s ×難易度弾速倍率） ---
+  tryEnemyFire(
+    e,
+    dt,
+    ctx,
+    toPlayer,
+    pick !== null && pick.hasLos,
+    c,
+    scaleBulletSpeed(ENEMY_BULLET_CFG, mods.bulletSpeedMult),
+    mods.fireIntervalMult,
+  );
 }

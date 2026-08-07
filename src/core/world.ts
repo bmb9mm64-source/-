@@ -1,7 +1,7 @@
 /**
- * ゲームワールド — ミッション進行・戦車・弾・地雷・敵AI 6種
- * （セントリー／ローバー／スナイパー／マインレイヤー／リフレクター／チェイサー）の
+ * ゲームワールド — ミッション進行・戦車・弾・地雷・敵AI 10種の
  * ゲーム状態と更新ロジック（Phaser 非依存の純粋 TS）。
+ * 敵の生成・更新・配色は enemyRegistry.ts の1エントリに集約してあり、ここは種類を数えない。
  * シーン（Phaser 側）は入力を渡して結果を描画・発音するだけの薄い層にする（CLAUDE.md 規約）。
  *
  * 進行（GDD §8）：banner（「MISSION n」2秒表示）→ playing（開始後1秒は敵射撃グレース）
@@ -28,21 +28,18 @@ import {
   updateBullet,
   updateBulletArming,
 } from "./bullet";
-import { createChaser, type ChaserTank, updateChaser } from "./chaser";
 import { type Difficulty, type DifficultyMods, resolveDifficulty } from "./difficulty";
+import { ENEMY_KINDS } from "./enemyKinds";
+import {
+  ENEMY_DEFS,
+  type EnemyTank,
+  type EnemyUpdateContext,
+} from "./enemyRegistry";
 import { tryFire } from "./firing";
 import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
 import { destroyXTiles, type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
-import { createMinelayer, type MinelayerTank, updateMinelayer } from "./minelayer";
-import { createMortar, type MortarTank, updateMortar } from "./mortar";
-import { createPrism, type PrismTank, updatePrism } from "./prism";
-import { createShielder, shieldBlocks, type ShielderTank, updateShielder } from "./shielder";
-import { createVolley, type VolleyTank, updateVolley } from "./volley";
-import { createReflector, type ReflectorTank, updateReflector } from "./reflector";
-import { createRover, type RoverTank, updateRover } from "./rover";
-import { createSentry, type SentryTank, updateSentry } from "./sentry";
-import { createSniper, type SniperTank, updateSniper } from "./sniper";
+import { shieldBlocks } from "./shielder";
 import { findNearbyFloor, type ParsedStage, parseStage } from "./stage";
 import { moveTank } from "./tank";
 import type { PlayerTank } from "./types";
@@ -50,18 +47,7 @@ import type { PlayerTank } from "./types";
 /** ワールドの進行状態（ポーズはシーン側の責務なので含まない） */
 export type GameStatus = "banner" | "playing" | "gameover" | "allclear";
 
-/** 敵戦車（セントリー／ローバー／スナイパー／マインレイヤー／リフレクター／チェイサー） */
-export type EnemyTank =
-  | SentryTank
-  | RoverTank
-  | SniperTank
-  | MinelayerTank
-  | ReflectorTank
-  | ChaserTank
-  | PrismTank
-  | ShielderTank
-  | VolleyTank
-  | MortarTank;
+export type { EnemyTank }; // 敵戦車の型は enemyRegistry.ts が持つ（従来の import 元を維持）
 
 /** ミッション定義（src/stages/missions.ts の要素と互換） */
 export interface MissionDef {
@@ -118,6 +104,12 @@ export class GameWorld {
   events: WorldEvent[] = []; // 直近の update で起きた出来事
   lastExplosions: Explosion[] = []; // 直近の update で起きた爆発の座標（演出用）
   lastDestroyedTanks: { x: number; y: number }[] = []; // 直近の update で撃破された戦車の座標（敵＋プレイヤー。撃破演出用。GDD §8.5）
+  /**
+   * プレイヤー＋敵の全戦車（移動の衝突判定・地雷の起爆判定で共用）。
+   * 顔ぶれはミッション中に増減しないので loadMission で1本だけ組み、毎フレームの再確保をしない。
+   * moveTank は自分自身の参照を無視するため、動く側もこの配列をそのまま渡してよい。
+   */
+  private allTanks: (PlayerTank | EnemyTank)[] = [];
 
   // --- ミッションタイム（GDD §8.5。バナー中は進まない。ポーズはシーン側が update を呼ばないため自然に停止） ---
   missionTime = 0; // 現ミッションの経過タイム [s]（loadMission＝ミッション切替・被弾リセットで 0 に戻る）
@@ -165,18 +157,11 @@ export class GameWorld {
       if (i > 0) spawn = findNearbyFloor(this.stage, this.stage.playerSpawn);
       this.players.push(createPlayer(spawn.x, spawn.y, i));
     }
-    this.enemies = [
-      ...this.stage.sentrySpawns.map((sp) => createSentry(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.roverSpawns.map((sp) => createRover(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.sniperSpawns.map((sp) => createSniper(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.minelayerSpawns.map((sp) => createMinelayer(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.reflectorSpawns.map((sp) => createReflector(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.chaserSpawns.map((sp) => createChaser(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.prismSpawns.map((sp) => createPrism(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.shielderSpawns.map((sp) => createShielder(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.volleySpawns.map((sp) => createVolley(sp.x, sp.y, this.rng, this.mods)),
-      ...this.stage.mortarSpawns.map((sp) => createMortar(sp.x, sp.y, this.rng, this.mods)),
-    ];
+    this.enemies = ENEMY_KINDS.flatMap((kind) => {
+      const d = ENEMY_DEFS[kind];
+      return this.stage.spawns[kind].map((sp) => d.create(sp.x, sp.y, this.rng, this.mods));
+    });
+    this.allTanks = [...this.players, ...this.enemies];
     this.bullets = [];
     this.mines = [];
     this.grace = BALANCE.GAME.START_GRACE;
@@ -225,7 +210,9 @@ export class GameWorld {
 
   /** 生存している敵の数 */
   enemiesLeft(): number {
-    return this.enemies.filter((e) => e.alive).length;
+    let n = 0;
+    for (const e of this.enemies) if (e.alive) n++;
+    return n;
   }
 
   /**
@@ -267,8 +254,7 @@ export class GameWorld {
         const len = Math.hypot(mx, my); // 斜め入力の速度正規化
         const dx = (mx / len) * BALANCE.PLAYER.SPEED * dt;
         const dy = (my / len) * BALANCE.PLAYER.SPEED * dt;
-        const blockers = [...this.players.filter((o) => o !== p), ...this.enemies];
-        moveTank(p, dx, dy, blockers, this.stage);
+        moveTank(p, dx, dy, this.allTanks, this.stage);
         // 車体を移動方向へ滑らかに回転（演出。移動速度には影響しない）
         const moveAngle = Math.atan2(my, mx);
         p.bodyAngle = rotateToward(p.bodyAngle, moveAngle, BALANCE.PLAYER.BODY_TURN_SPEED * dt);
@@ -304,120 +290,20 @@ export class GameWorld {
     // --- 敵AI（発射数・敷設数は前後差分で数えて効果音イベントにする） ---
     const bulletsBeforeAI = this.bullets.length;
     const minesBeforeAI = this.mines.length;
+    // 全戦車を1本の配列にまとめて全員で使い回す（moveTank は自分自身の参照を無視する）
+    const enemyCtx: EnemyUpdateContext = {
+      players: this.players,
+      bullets: this.bullets,
+      blockers: this.allTanks,
+      mines: this.mines,
+      stage: this.stage,
+      grace: this.grace,
+      rng: this.rng,
+      mods: this.mods,
+    };
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      switch (e.kind) {
-        case "sentry":
-          updateSentry(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "sniper":
-          updateSniper(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "reflector":
-          // 弾は REFLECTOR_BULLET_CFG（反射上限2回を弾自身が持つ）で生成されるため、
-          // 下の弾更新ループは特別扱い不要（updateBullet が b.maxBounces を優先する）
-          updateReflector(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "prism":
-          // 弾は PRISM_BULLET_CFG（反射上限3回を弾自身が持つ）。リフレクターと同じ扱い
-          updatePrism(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "volley": // 敵V：3連射（GDD §6 v0.14）
-          updateVolley(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "mortar": // 敵M：榴弾（炸裂は弾側の fuse で処理。GDD §6 v0.14）
-          updateMortar(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "shielder": // 敵S：盾持ち（正面からの弾を無効化。GDD §6 v0.14）
-          updateShielder(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "rover":
-          updateRover(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "chaser":
-          updateChaser(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-        case "minelayer":
-          // 敵の地雷も世界の地雷リストに入れ、既存の起爆・誘爆・描画に共通で乗せる
-          // （設置者除外は mine.ts が owner 単位で適用。上限3個は MINELAYER_MINE_CFG）
-          updateMinelayer(e, dt, {
-            players: this.players,
-            bullets: this.bullets,
-            blockers: [...this.players, ...this.enemies.filter((o) => o !== e)],
-            mines: this.mines,
-            stage: this.stage,
-            grace: this.grace,
-            rng: this.rng,
-            mods: this.mods,
-          });
-          break;
-      }
+      ENEMY_DEFS[e.kind].update(e, dt, enemyCtx);
     }
     for (let i = this.bullets.length - bulletsBeforeAI; i > 0; i--) this.events.push("fire");
     for (let i = this.mines.length - minesBeforeAI; i > 0; i--) this.events.push("minePlaced");
@@ -444,11 +330,8 @@ export class GameWorld {
       }
     }
 
-    // --- 弾同士の相殺（消えた数の前後差分から相殺回数＝2発1組を数える） ---
-    const aliveBulletsBefore = this.bullets.filter((b) => !b.dead).length;
-    resolveBulletVsBullet(this.bullets);
-    const cancelledCount = aliveBulletsBefore - this.bullets.filter((b) => !b.dead).length;
-    for (let i = 0; i < cancelledCount; i += 2) this.events.push("cancel");
+    // --- 弾同士の相殺（2発1組。組数がそのまま効果音の回数） ---
+    for (let i = resolveBulletVsBullet(this.bullets); i > 0; i--) this.events.push("cancel");
 
     // --- 被弾検出用スナップショット（地雷・弾での死亡をまとめて差分で数える） ---
     const playersAliveBefore = this.players.map((p) => p.alive);
@@ -456,15 +339,11 @@ export class GameWorld {
     // --- 地雷（起爆・誘爆・爆風による戦車/弾/X壁の破壊） ---
     const enemiesAliveBefore = this.enemiesLeft();
     const enemiesAliveFlags = this.enemies.map((e) => e.alive); // 撃破位置の特定用（演出。GDD §8.5）
-    const mineResult = updateMines(
-      this.mines,
-      dt,
-      [...this.players, ...this.enemies],
-      this.bullets,
-      this.stage,
-    );
+    const mineResult = updateMines(this.mines, dt, this.allTanks, this.bullets, this.stage);
     for (let i = 0; i < mineResult.explosions.length; i++) this.events.push("mineExploded");
-    this.lastExplosions = mineResult.explosions;
+    // 榴弾の炸裂（上のループで積んだぶん）と地雷の爆発をまとめて演出へ渡す。
+    // ここを代入にすると榴弾の爆発演出が毎フレーム捨てられるので必ず push で足す。
+    this.lastExplosions.push(...mineResult.explosions);
     if (mineResult.wallsDestroyed > 0) this.stageVersion++; // 盤面が変わった（描画更新用）
     this.mines = this.mines.filter((m) => !m.dead);
 

@@ -6,16 +6,14 @@
  * - スロット保存（RecordStore 抽象を再利用した注入式。キー `hanedan.editor.slot.<n>`）
  */
 import { BALANCE } from "../config/balance";
+import { allEnemySpawns, ENEMY_CHARS, isEnemyChar } from "./enemyKinds";
 import { hasLineOfSight } from "./los";
 import type { RecordStore } from "./records";
 import { findNearbyFloor, parseStage } from "./stage";
 
-/** エディタで扱えるタイル記号（パレットの並び順。E/F は v0.9、G は v0.10 の敵記号） */
-export const EDITOR_TILES = [".", "#", "X", "H", "P", "A", "B", "C", "D", "E", "F", "G", "S", "V", "M"] as const;
+/** エディタで扱えるタイル記号（パレットの並び順。敵記号は enemyKinds.ts の一覧から取る） */
+export const EDITOR_TILES = [".", "#", "X", "H", "P", ...ENEMY_CHARS] as const;
 export type EditorTile = (typeof EDITOR_TILES)[number];
-
-/** 敵記号（合計12体上限のカウント対象） */
-const ENEMY_CHARS = new Set(["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]);
 
 /** 敵の合計配置上限（GDD §12.7：性能と難易度の上限） */
 export const EDITOR_MAX_ENEMIES = 12;
@@ -54,7 +52,7 @@ export function linesToGrid(lines: readonly string[]): string[][] {
 /** グリッド中の敵の合計数 */
 export function countEnemies(grid: readonly string[][]): number {
   let n = 0;
-  for (const row of grid) for (const ch of row) if (ENEMY_CHARS.has(ch)) n++;
+  for (const row of grid) for (const ch of row) if (isEnemyChar(ch)) n++;
   return n;
 }
 
@@ -71,7 +69,7 @@ export function setTile(grid: string[][], col: number, row: number, ch: EditorTi
   if (!(EDITOR_TILES as readonly string[]).includes(ch)) return false;
   const current = grid[row]![col]!;
   if (current === ch) return true; // 既に同じ（適用扱い）
-  if (ENEMY_CHARS.has(ch) && !ENEMY_CHARS.has(current) && countEnemies(grid) >= EDITOR_MAX_ENEMIES) {
+  if (isEnemyChar(ch) && !isEnemyChar(current) && countEnemies(grid) >= EDITOR_MAX_ENEMIES) {
     return false; // 敵の上限（既存の敵の置き換えは可）
   }
   if (ch === "P") {
@@ -111,19 +109,7 @@ export function validateStage(grid: readonly string[][]): StageValidation {
   if (near.x === stage.playerSpawn.x && near.y === stage.playerSpawn.y) {
     errors.push("P の周囲に床がありません（2人プレイの2P出現位置が必要です）");
   }
-  const enemies = [
-    ...stage.sentrySpawns,
-    ...stage.roverSpawns,
-    ...stage.sniperSpawns,
-    ...stage.minelayerSpawns,
-    ...stage.reflectorSpawns,
-    ...stage.chaserSpawns,
-    ...stage.prismSpawns,
-    ...stage.shielderSpawns,
-    ...stage.volleySpawns,
-    ...stage.mortarSpawns,
-  ];
-  for (const e of enemies) {
+  for (const e of allEnemySpawns(stage.spawns)) {
     if (hasLineOfSight(stage, stage.playerSpawn.x, stage.playerSpawn.y, e.x, e.y)) {
       warnings.push("開幕時に P から敵への射線が通っています（開幕即撃たれる可能性）");
       break;

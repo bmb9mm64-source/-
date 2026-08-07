@@ -21,6 +21,28 @@ export interface TargetPick<T extends TargetInfo> {
 }
 
 /**
+ * (sx,sy) から最も近い生存候補を返す（いなければ null）。
+ * 敵F「チェイサー」の追跡アンカー・敵D「マインレイヤー」の敷設可否判定と selectTarget で共用する。
+ */
+export function nearestAlive<T extends TargetInfo>(
+  sx: number,
+  sy: number,
+  candidates: readonly T[],
+): T | null {
+  let best: T | null = null;
+  let bestDistSq = Infinity;
+  for (const c of candidates) {
+    if (!c.alive) continue;
+    const distSq = (c.x - sx) ** 2 + (c.y - sy) ** 2;
+    if (distSq < bestDistSq) {
+      best = c;
+      bestDistSq = distSq;
+    }
+  }
+  return best;
+}
+
+/**
  * (sx,sy) の射手から見た標的を選ぶ。
  * 1) 生存中かつ射線が通る候補のうち最も近い1体（hasLos=true）
  * 2) いなければ生存中で最も近い1体（hasLos=false。照準追従のみ）

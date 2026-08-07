@@ -12,7 +12,7 @@ describe("跳弾（入射角＝反射角）", () => {
   it("壁に当たると該当軸の速度が反転し、反射回数が1増える", () => {
     // 右壁（x=128）へ向けて水平に飛ぶ弾。dt=0.05 で 130 まで進み衝突する
     const b = makeBullet({ x: 120, y: 80, vx: 200, vy: 0 });
-    updateBullet(b, 0.05, stage, 1);
+    updateBullet(b, 0.05, stage);
     expect(b.vx).toBe(-200); // X軸速度が反転
     expect(b.vy).toBe(0); // Y軸速度は不変
     expect(b.bounces).toBe(1);
@@ -23,7 +23,7 @@ describe("跳弾（入射角＝反射角）", () => {
   it("角で同フレームに両軸が反射しても反射回数は1回と数える", () => {
     // 右上の角へ 45° で突入：X軸で右壁、Y軸で上壁に同フレームで衝突する
     const b = makeBullet({ x: 124, y: 38, vx: 200, vy: -200 });
-    updateBullet(b, 0.05, stage, 1);
+    updateBullet(b, 0.05, stage);
     expect(b.vx).toBe(-200); // 両軸とも反転
     expect(b.vy).toBe(200);
     expect(b.bounces).toBe(1); // 同時反射は1回カウント
@@ -32,14 +32,14 @@ describe("跳弾（入射角＝反射角）", () => {
 
   it("反射上限を超えると消滅する（2回目の壁接触）", () => {
     const b = makeBullet({ x: 120, y: 80, vx: 200, vy: 0, bounces: 1 });
-    updateBullet(b, 0.05, stage, 1);
+    updateBullet(b, 0.05, stage);
     expect(b.bounces).toBe(2);
     expect(b.dead).toBe(true);
   });
 
   it("壁に触れないフレームでは直進するだけで反射しない", () => {
     const b = makeBullet({ x: 80, y: 80, vx: 200, vy: 0 });
-    updateBullet(b, 0.05, stage, 1);
+    updateBullet(b, 0.05, stage);
     expect(b.x).toBeCloseTo(90);
     expect(b.bounces).toBe(0);
     expect(b.dead).toBe(false);

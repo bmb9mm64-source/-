@@ -19,6 +19,7 @@
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
+import { allEnemySpawns } from "../src/core/enemyKinds";
 import { hasLineOfSight } from "../src/core/los";
 import { findOuterWallRicochet } from "../src/core/ricochetAim";
 import { findNearbyFloor, parseStage, solidForTank } from "../src/core/stage";
@@ -133,18 +134,7 @@ function validate(g: Grid, kinds: string[]): boolean {
   const p2 = findNearbyFloor(stage, p1);
   if (p2.x === p1.x && p2.y === p1.y) return false; // 2P の出現位置がない
 
-  const enemies = [
-    ...stage.sentrySpawns,
-    ...stage.roverSpawns,
-    ...stage.sniperSpawns,
-    ...stage.minelayerSpawns,
-    ...stage.reflectorSpawns,
-    ...stage.chaserSpawns,
-    ...stage.prismSpawns,
-    ...stage.shielderSpawns,
-    ...stage.volleySpawns,
-    ...stage.mortarSpawns,
-  ];
+  const enemies = allEnemySpawns(stage.spawns);
   if (enemies.length !== kinds.length) return false;
 
   // 開幕：全敵への直接射線が通らない
@@ -152,7 +142,7 @@ function validate(g: Grid, kinds: string[]): boolean {
     for (const p of [p1, p2]) if (hasLineOfSight(stage, p.x, p.y, e.x, e.y)) return false;
   }
   // 開幕：E・G は反射射線も持たない
-  const alwaysRicochet = [...stage.reflectorSpawns, ...stage.prismSpawns];
+  const alwaysRicochet = [...stage.spawns.reflector, ...stage.spawns.prism];
   for (const e of alwaysRicochet) {
     for (const p of [p1, p2]) if (findOuterWallRicochet(stage, e.x, e.y, p.x, p.y)) return false;
   }
@@ -181,17 +171,17 @@ function validate(g: Grid, kinds: string[]): boolean {
 
   // 敵S「シールダー」は正面からの直射では絶対に倒せないため、
   // **跳弾で当てられる位置が必ず存在すること**を必須条件にする（GDD §6 v0.14）
-  for (const e of stage.shielderSpawns) {
+  for (const e of stage.spawns.shielder) {
     const canRicochet = reachPts.some((p) => findOuterWallRicochet(stage, p.x, p.y, e.x, e.y));
     if (!canRicochet) return false;
   }
 
   // 移動する敵（B・D・F・S）は動ける床の広がりが必要
   const movers = [
-    ...stage.roverSpawns,
-    ...stage.minelayerSpawns,
-    ...stage.chaserSpawns,
-    ...stage.shielderSpawns,
+    ...stage.spawns.rover,
+    ...stage.spawns.minelayer,
+    ...stage.spawns.chaser,
+    ...stage.spawns.shielder,
   ];
   for (const m of movers) {
     const area = reachable(g, Math.floor(m.x / T), Math.floor(m.y / T));

@@ -13,7 +13,7 @@ export interface Bullet {
   radius: number;
   bounces: number; // これまでの反射回数
   maxBounces?: number; // この弾固有の反射上限（未設定＝BALANCE.BULLET.MAX_BOUNCES。敵E弾は2。GDD §6 v0.9）
-  owner: object; // 同時発射数のカウント用
+  owner: BulletOwner; // 発射者（同時発射数のカウントと、発射直後の自弾判定に使う）
   ownerIsPlayer: boolean; // 発射者がプレイヤー側か（v0.12：敵弾は敵に当たらない。GDD §5.2）
   armed: boolean; // 発射者から一度離れたか（GDD §5.3 v0.12：離れるまで発射者には当たらない）
   fuse?: number; // 榴弾の炸裂までの残り時間 [s]（敵M「ボマー」の弾のみ。GDD §6 v0.14）
@@ -22,14 +22,18 @@ export interface Bullet {
   dead: boolean;
 }
 
+/** 弾の発射者（戦車。参照の同一性で「自分の弾か」を判定する） */
+export interface BulletOwner {
+  x: number;
+  y: number;
+  radius?: number; // 対弾用の円近似半径 [px]（省略時はプレイヤー相当）
+  kind?: string; // "player" ならプレイヤー側（GDD §5.2）
+}
+
 /** 弾が発射者から離れたら「発射者にも当たる」状態にする（GDD §5.3 v0.12） */
 export function updateBulletArming(b: Bullet): void {
   if (b.armed) return;
-  const o = b.owner as { x?: number; y?: number; radius?: number };
-  if (typeof o.x !== "number" || typeof o.y !== "number") {
-    b.armed = true; // 発射者の位置が不明なら従来どおり即座に有効
-    return;
-  }
+  const o = b.owner;
   const clear = (o.radius ?? BALANCE.PLAYER.RADIUS) + b.radius;
   if (Math.hypot(b.x - o.x, b.y - o.y) > clear) b.armed = true;
 }
@@ -71,7 +75,7 @@ function safeMuzzleOffset(
  */
 export function spawnBullet(
   bullets: Bullet[],
-  owner: { x: number; y: number; kind?: string },
+  owner: BulletOwner,
   angle: number,
   cfg: BulletSpawnConfig = BALANCE.BULLET,
   stage?: ParsedStage,
@@ -156,7 +160,7 @@ export function scaleBulletSpeed(cfg: BulletSpawnConfig, mult: number): BulletSp
 }
 
 /** owner が場に出している生存弾の数 */
-export function liveBulletCount(bullets: readonly Bullet[], owner: object): number {
+export function liveBulletCount(bullets: readonly Bullet[], owner: BulletOwner): number {
   let n = 0;
   for (const b of bullets) if (!b.dead && b.owner === owner) n++;
   return n;
@@ -201,21 +205,16 @@ function circleHitsWall(stage: ParsedStage, x: number, y: number, rad: number): 
  * 軸ごとに移動→衝突判定→該当軸の速度反転＋押し戻し。
  * 角で同フレームに両軸が反射しても反射回数は「1回」と数える。
  * 破壊可能壁 X に触れた弾は反射せず消滅する（GDD §5。壁は壊れない）。
- * 反射上限は「弾固有の値（b.maxBounces。敵E弾=2）＞引数 maxBounces ＞共通既定1」の優先で解決する。
+ * 反射上限は弾自身が持つ（b.maxBounces。未設定なら共通既定 BALANCE.BULLET.MAX_BOUNCES）。
  * ※最大弾速374px/s（スナイパー弾×難易度1.1） × dt上限0.05s = 最大18.7px/フレーム < タイル32px なので突き抜けは起きない。
  */
-export function updateBullet(
-  b: Bullet,
-  dt: number,
-  stage: ParsedStage,
-  maxBounces: number = BALANCE.BULLET.MAX_BOUNCES,
-): void {
+export function updateBullet(b: Bullet, dt: number, stage: ParsedStage): void {
   if (b.fuse !== undefined) {
     updateShell(b, dt, stage); // 榴弾（敵M弾）は反射せず、時間切れ／壁接触で炸裂する
     return;
   }
   const eps = BALANCE.EPS;
-  const bounceLimit = b.maxBounces ?? maxBounces; // 弾固有の上限が最優先（敵E「リフレクター」の2回反射弾）
+  const bounceLimit = b.maxBounces ?? BALANCE.BULLET.MAX_BOUNCES; // 敵E弾=2・敵G弾=3
   let bounced = false;
 
   // --- X軸移動 ---
@@ -277,8 +276,9 @@ function updateShell(b: Bullet, dt: number, stage: ParsedStage): void {
   }
 }
 
-/** 弾同士の相殺：接触した2発を両方消滅させる（GDD §5） */
-export function resolveBulletVsBullet(bullets: Bullet[]): void {
+/** 弾同士の相殺：接触した2発を両方消滅させる（GDD §5）。戻り値は相殺した組数 */
+export function resolveBulletVsBullet(bullets: Bullet[]): number {
+  let pairs = 0;
   for (let i = 0; i < bullets.length; i++) {
     const a = bullets[i]!;
     if (a.dead) continue;
@@ -291,10 +291,12 @@ export function resolveBulletVsBullet(bullets: Bullet[]): void {
       if (dx * dx + dy * dy < rr * rr) {
         a.dead = true;
         c.dead = true;
+        pairs++;
         break; // 1発は1発としか相殺しない（GDD §5「接触した2発が両方消滅」）
       }
     }
   }
+  return pairs;
 }
 
 /** 弾 vs 戦車（円近似）。弾は発射者を問わず全戦車に当たる（自分の跳ね返り弾で自爆あり） */

@@ -3,29 +3,29 @@
  * 固定砲台（移動なし）。差分は**3連射**：
  *   撃てる条件が揃うと 0.18 秒間隔で3発を撃ち、その後セット間隔（平均3.2±1.0s）を待つ。
  *   弾はやや遅い 200px/s で、プレイヤーが弾同士の相殺で撃ち落とす余地を残す。
+ * セット制御が IDLE/AIM/RELOAD に収まらないため turretAi.ts には載せず、
+ * 共通部品（照準ブレ・発射間隔の抽選）だけを enemyAi.ts から使う。
  * Phaser 非依存の純粋 TS。
  */
 import { BALANCE } from "../config/balance";
 import { type Bullet, liveBulletCount, scaleBulletSpeed, spawnBullet, VOLLEY_BULLET_CFG } from "./bullet";
 import { type DifficultyMods, NORMAL_MODS } from "./difficulty";
-import { angleDiff, randRange, type Rng, rotateToward } from "./mathUtils";
+import {
+  createEnemyBody,
+  type JitterState,
+  rollAimJitter,
+  rollFireInterval,
+} from "./enemyAi";
+import { angleDiff, type Rng, rotateToward } from "./mathUtils";
 import type { ParsedStage } from "./stage";
 import { selectTarget, type TargetInfo } from "./targeting";
 import type { TankBody } from "./types";
 
 /** バースター戦車 */
-export interface VolleyTank extends TankBody {
+export interface VolleyTank extends TankBody, JitterState {
   kind: "volley";
   fireTimer: number; // 次のセット／次の連射までの残り時間 [s]
   burstLeft: number; // このセットで残り何発撃つか（0 なら次のセット待ち）
-  jitter: number;
-  jitterTimer: number;
-}
-
-/** 次回セット間隔（平均±ゆらぎ）×難易度倍率 */
-export function volleyNextInterval(rng: Rng, intervalMult = 1): number {
-  const c = BALANCE.VOLLEY;
-  return (c.FIRE_INTERVAL_MEAN + randRange(rng, -c.FIRE_INTERVAL_VAR, c.FIRE_INTERVAL_VAR)) * intervalMult;
 }
 
 /** バースターを生成する（初期は下向き） */
@@ -36,15 +36,8 @@ export function createVolley(
   mods: DifficultyMods = NORMAL_MODS,
 ): VolleyTank {
   return {
-    kind: "volley",
-    x,
-    y,
-    bodyAngle: Math.PI / 2,
-    turretAngle: Math.PI / 2,
-    half: BALANCE.VOLLEY.SIZE / 2,
-    radius: BALANCE.VOLLEY.RADIUS,
-    alive: true,
-    fireTimer: volleyNextInterval(rng, mods.fireIntervalMult),
+    ...createEnemyBody("volley", x, y, BALANCE.VOLLEY),
+    fireTimer: rollFireInterval(rng, BALANCE.VOLLEY, mods.fireIntervalMult),
     burstLeft: 0,
     jitter: 0,
     jitterTimer: 0,
@@ -65,13 +58,9 @@ export interface VolleyUpdateContext {
 export function updateVolley(e: VolleyTank, dt: number, ctx: VolleyUpdateContext): void {
   const c = BALANCE.VOLLEY;
   const mods = ctx.mods ?? NORMAL_MODS;
+  const bulletCfg = scaleBulletSpeed(VOLLEY_BULLET_CFG, mods.bulletSpeedMult);
 
-  // --- 照準ブレの引き直し ---
-  e.jitterTimer -= dt;
-  if (e.jitterTimer <= 0) {
-    e.jitter = randRange(ctx.rng, -c.JITTER_MAX, c.JITTER_MAX);
-    e.jitterTimer = randRange(ctx.rng, c.JITTER_INTERVAL_MIN, c.JITTER_INTERVAL_MAX);
-  }
+  rollAimJitter(e, dt, c, ctx.rng);
 
   const pick = selectTarget(ctx.stage, e.x, e.y, ctx.players);
   if (!pick) return;
@@ -85,18 +74,13 @@ export function updateVolley(e: VolleyTank, dt: number, ctx: VolleyUpdateContext
     // 連射中：同時発射数に空きがあれば次弾を撃つ（射線が切れたらセットを中断）
     if (!pick.hasLos || liveBulletCount(ctx.bullets, e) >= c.MAX_BULLETS) {
       e.burstLeft = 0;
-      e.fireTimer = volleyNextInterval(ctx.rng, mods.fireIntervalMult);
+      e.fireTimer = rollFireInterval(ctx.rng, c, mods.fireIntervalMult);
       return;
     }
-    spawnBullet(
-      ctx.bullets,
-      e,
-      e.turretAngle,
-      scaleBulletSpeed(VOLLEY_BULLET_CFG, mods.bulletSpeedMult),
-      ctx.stage,
-    );
+    spawnBullet(ctx.bullets, e, e.turretAngle, bulletCfg, ctx.stage);
     e.burstLeft--;
-    e.fireTimer = e.burstLeft > 0 ? c.BURST_GAP : volleyNextInterval(ctx.rng, mods.fireIntervalMult);
+    e.fireTimer =
+      e.burstLeft > 0 ? c.BURST_GAP : rollFireInterval(ctx.rng, c, mods.fireIntervalMult);
     return;
   }
 
@@ -106,13 +90,7 @@ export function updateVolley(e: VolleyTank, dt: number, ctx: VolleyUpdateContext
     liveBulletCount(ctx.bullets, e) < c.MAX_BULLETS &&
     Math.abs(angleDiff(toPlayer, e.turretAngle)) < c.FIRE_ANGLE_TOL;
   if (ready) {
-    spawnBullet(
-      ctx.bullets,
-      e,
-      e.turretAngle,
-      scaleBulletSpeed(VOLLEY_BULLET_CFG, mods.bulletSpeedMult),
-      ctx.stage,
-    );
+    spawnBullet(ctx.bullets, e, e.turretAngle, bulletCfg, ctx.stage);
     e.burstLeft = c.BURST_COUNT - 1; // 残り2発
     e.fireTimer = c.BURST_GAP;
   }

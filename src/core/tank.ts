@@ -45,6 +45,8 @@ export function tanksOverlap(ax: number, ay: number, aHalf: number, b: TankBlock
  * 戦車を軸ごとに移動させる（X→Y の順。壁・穴タイルおよび blockers（他戦車）と衝突判定）。
  * タイルに当たった場合はタイル境界へスナップ（めり込み防止）。
  * 戦車同士は通り抜け不可（GDD §5.5）。
+ * blockers に tank 自身が含まれていても構わない（参照が同じものは無視する）。
+ * これにより呼び出し側は「全戦車の配列」を1本だけ用意して全員で使い回せる。
  */
 export function moveTank(
   tank: MovableTank,
@@ -65,7 +67,7 @@ export function moveTank(
     }
     let blocked = false;
     for (const o of blockers) {
-      if (o.alive && tanksOverlap(nx, tank.y, tank.half, o)) {
+      if (o !== tank && o.alive && tanksOverlap(nx, tank.y, tank.half, o)) {
         blocked = true;
         break;
       }
@@ -82,7 +84,7 @@ export function moveTank(
     }
     let blocked = false;
     for (const o of blockers) {
-      if (o.alive && tanksOverlap(tank.x, ny, tank.half, o)) {
+      if (o !== tank && o.alive && tanksOverlap(tank.x, ny, tank.half, o)) {
         blocked = true;
         break;
       }

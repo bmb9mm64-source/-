@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
+import { allEnemySpawns } from "../src/core/enemyKinds";
 import { hasLineOfSight } from "../src/core/los";
 import { findOuterWallRicochet } from "../src/core/ricochetAim";
 import { findNearbyFloor, parseStage, tileAt } from "../src/core/stage";
@@ -48,17 +49,17 @@ describe("本編ミッション構成", () => {
     // 敵構成の表は手設計の M1〜M16 のみ（M17 以降は生成物のため構成は生成器が保証する）
     ALL_MISSIONS.slice(0, expected.length).forEach((m, i) => {
       const stage = parseStage(m.grid);
-      expect(stage.sentrySpawns, `${m.name} のセントリー数`).toHaveLength(expected[i]!.sentries);
-      expect(stage.roverSpawns, `${m.name} のローバー数`).toHaveLength(expected[i]!.rovers);
-      expect(stage.sniperSpawns, `${m.name} のスナイパー数`).toHaveLength(expected[i]!.snipers);
-      expect(stage.minelayerSpawns, `${m.name} のマインレイヤー数`).toHaveLength(
+      expect(stage.spawns.sentry, `${m.name} のセントリー数`).toHaveLength(expected[i]!.sentries);
+      expect(stage.spawns.rover, `${m.name} のローバー数`).toHaveLength(expected[i]!.rovers);
+      expect(stage.spawns.sniper, `${m.name} のスナイパー数`).toHaveLength(expected[i]!.snipers);
+      expect(stage.spawns.minelayer, `${m.name} のマインレイヤー数`).toHaveLength(
         expected[i]!.minelayers,
       );
-      expect(stage.reflectorSpawns, `${m.name} のリフレクター数`).toHaveLength(
+      expect(stage.spawns.reflector, `${m.name} のリフレクター数`).toHaveLength(
         expected[i]!.reflectors,
       );
-      expect(stage.chaserSpawns, `${m.name} のチェイサー数`).toHaveLength(expected[i]!.chasers);
-      expect(stage.prismSpawns, `${m.name} のプリズム数`).toHaveLength(expected[i]!.prisms ?? 0);
+      expect(stage.spawns.chaser, `${m.name} のチェイサー数`).toHaveLength(expected[i]!.chasers);
+      expect(stage.spawns.prism, `${m.name} のプリズム数`).toHaveLength(expected[i]!.prisms ?? 0);
     });
   });
 
@@ -68,7 +69,7 @@ describe("本編ミッション構成", () => {
       const stage = parseStage(m.grid);
       const p1 = stage.playerSpawn;
       const p2 = findNearbyFloor(stage, p1);
-      for (const e of [...stage.reflectorSpawns, ...stage.prismSpawns]) {
+      for (const e of [...stage.spawns.reflector, ...stage.spawns.prism]) {
         for (const p of [p1, p2]) {
           expect(
             findOuterWallRicochet(stage, e.x, e.y, p.x, p.y),
@@ -103,19 +104,7 @@ for (const mission of ALL_MISSIONS) {
 
     it("P・全敵の初期位置は床である", () => {
       const stage = parseStage(mission.grid); // パース成功自体が P 存在の検証を兼ねる
-      const spawns = [
-        stage.playerSpawn,
-        ...stage.sentrySpawns,
-        ...stage.roverSpawns,
-        ...stage.sniperSpawns,
-        ...stage.minelayerSpawns,
-        ...stage.reflectorSpawns,
-        ...stage.chaserSpawns,
-        ...stage.prismSpawns,
-        ...stage.shielderSpawns,
-        ...stage.volleySpawns,
-        ...stage.mortarSpawns,
-      ];
+      const spawns = [stage.playerSpawn, ...allEnemySpawns(stage.spawns)];
       for (const sp of spawns) {
         const col = Math.floor(sp.x / stage.tile);
         const row = Math.floor(sp.y / stage.tile);
@@ -126,18 +115,7 @@ for (const mission of ALL_MISSIONS) {
     it("開幕時に P から全敵への射線が通らない（開幕即撃ち抜き防止）", () => {
       const stage = parseStage(mission.grid);
       const p = stage.playerSpawn;
-      const enemies = [
-        ...stage.sentrySpawns,
-        ...stage.roverSpawns,
-        ...stage.sniperSpawns,
-        ...stage.minelayerSpawns,
-        ...stage.reflectorSpawns,
-        ...stage.chaserSpawns,
-        ...stage.prismSpawns,
-        ...stage.shielderSpawns,
-        ...stage.volleySpawns,
-        ...stage.mortarSpawns,
-      ];
+      const enemies = allEnemySpawns(stage.spawns);
       expect(enemies.length).toBeGreaterThan(0);
       for (const e of enemies) {
         expect(

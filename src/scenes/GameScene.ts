@@ -15,6 +15,7 @@ import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
+import { ENEMY_DEFS } from "../core/enemyRegistry";
 import { eightWayAngle, type PlayerInput } from "../core/input";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
@@ -110,6 +111,9 @@ export class GameScene extends Phaser.Scene {
   private overlayGfx!: Phaser.GameObjects.Graphics;
   private overlayTitle!: Phaser.GameObjects.Text;
   private overlaySub!: Phaser.GameObjects.Text;
+  // オーバーレイの現在のレイアウト・色（同じ値の再設定＝無駄な Text 再描画を避けるための記憶）
+  private overlayLayoutIsAllClear: boolean | null = null;
+  private overlaySubColor = "";
 
   constructor() {
     super({ key: "GameScene" });
@@ -257,18 +261,8 @@ export class GameScene extends Phaser.Scene {
     // テストプレイ中はクリア/ゲームオーバーからエディタへ戻る（GDD §12.7）
     onKeyPress("R", () => {
       SFX.unlock();
-      if (this.customPlay && (this.world.status === "allclear" || this.world.status === "gameover")) {
-        this.scene.start("EditorScene");
-        return;
-      }
-      if (this.world.status === "allclear") {
-        this.scene.start("TitleScene");
-        return;
-      }
-      this.world.resetGame();
-      this.paused = false;
-      this.newRecordMissions.clear(); // ランのやり直し＝NEW 表示もリセット
-      this.clearFx = null;
+      if (this.handleEndScreenInput()) return;
+      this.restartRun(); // プレイ中の R はランのやり直し（M1 から）
     });
     // スペース：1P 地雷設置（1押下1設置）
     onKeyPress("SPACE", () => {
@@ -310,21 +304,7 @@ export class GameScene extends Phaser.Scene {
     // クリック：1P 射撃（左）／地雷（右）。終了画面では再開操作
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       SFX.unlock(); // 自動再生制限の解除（ユーザー操作後の初期化）
-      if (this.customPlay && (this.world.status === "allclear" || this.world.status === "gameover")) {
-        this.scene.start("EditorScene"); // テストプレイ終了 → エディタへ戻る（GDD §12.7）
-        return;
-      }
-      if (this.world.status === "gameover") {
-        this.world.resetGame(); // クリックで M1 から再スタート（残機3）
-        this.paused = false;
-        this.newRecordMissions.clear(); // ランのやり直し＝NEW 表示もリセット
-        this.clearFx = null;
-        return;
-      }
-      if (this.world.status === "allclear") {
-        this.scene.start("TitleScene");
-        return;
-      }
+      if (this.handleEndScreenInput()) return;
       // タッチは TouchController が扱う（仮想スティック・ボタンと二重に反応させない）
       if (pointer.wasTouch) {
         this.touchMode = true;
@@ -639,6 +619,34 @@ export class GameScene extends Phaser.Scene {
 
   /** 戦車1台の描画（車体矩形＋キャタピラ＋砲塔円＋砲身矩形） */
   /** シールダーの盾（守っている角度の弧）を描く。跳弾で背後を狙う判断材料になる（GDD §6 v0.14） */
+  /**
+   * 終了画面（全クリア／ゲームオーバー）での再開操作。処理したら true。
+   * R キーとクリックの両方から呼ぶ（同じ分岐を2か所に書かないため）。
+   */
+  private handleEndScreenInput(): boolean {
+    const status = this.world.status;
+    const ended = status === "allclear" || status === "gameover";
+    if (!ended) return false;
+    if (this.customPlay) {
+      this.scene.start("EditorScene"); // テストプレイ終了 → エディタへ戻る（GDD §12.7）
+      return true;
+    }
+    if (status === "allclear") {
+      this.scene.start("TitleScene");
+      return true;
+    }
+    this.restartRun(); // ゲームオーバー → M1 から再スタート
+    return true;
+  }
+
+  /** ランを最初からやり直す（ポーズ・NEW 表示・クリア演出もリセット） */
+  private restartRun(): void {
+    this.world.resetGame();
+    this.paused = false;
+    this.newRecordMissions.clear(); // ランのやり直し＝NEW 表示もリセット
+    this.clearFx = null;
+  }
+
   private drawShield(e: TankBody & { shieldAngle: number }): void {
     const g = this.dynGfx;
     const r = e.radius + 6;
@@ -690,7 +698,7 @@ export class GameScene extends Phaser.Scene {
     // 地雷（本体＋点滅ランプ。起爆が近いことは点滅で伝える。
     // 形は共通で、プレイヤー設置＝従来色／敵（マインレイヤー）設置＝琥珀ランプの配色差で識別）
     for (const m of world.mines) {
-      const isPlayerMine = (world.players as readonly object[]).includes(m.owner);
+      const isPlayerMine = m.ownerIsPlayer; // 設置時に確定している（毎フレームの owner 探索は不要）
       this.dynGfx.fillStyle(isPlayerMine ? COLORS.MINE : COLORS.ENEMY_MINE, 1);
       this.dynGfx.fillCircle(m.x, m.y, BALANCE.MINE.RADIUS);
       const blinkOn = Math.floor(m.fuse * BALANCE.FX.MINE_BLINK_HZ * 2) % 2 === 0;
@@ -700,43 +708,13 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // 戦車（セントリー＝橙／ローバー＝赤／スナイパー＝紫／マインレイヤー＝黄／
-    // リフレクター＝青緑／チェイサー＝白銀／1P＝青／2P＝緑。退場者は描かない）
+    // 敵戦車（配色は enemyRegistry の1エントリから引く。退場者は描かない）
     for (const e of world.enemies) {
       if (!e.alive) continue;
-      switch (e.kind) {
-        case "sentry":
-          this.drawTank(e, COLORS.ENEMY_BODY, COLORS.ENEMY_TRACK, COLORS.ENEMY_TURRET);
-          break;
-        case "rover":
-          this.drawTank(e, COLORS.ROVER_BODY, COLORS.ROVER_TRACK, COLORS.ROVER_TURRET);
-          break;
-        case "sniper":
-          this.drawTank(e, COLORS.SNIPER_BODY, COLORS.SNIPER_TRACK, COLORS.SNIPER_TURRET);
-          break;
-        case "minelayer":
-          this.drawTank(e, COLORS.MINELAYER_BODY, COLORS.MINELAYER_TRACK, COLORS.MINELAYER_TURRET);
-          break;
-        case "reflector": // 敵E：青緑（シアン）系（GDD §6 v0.9）
-          this.drawTank(e, COLORS.REFLECTOR_BODY, COLORS.REFLECTOR_TRACK, COLORS.REFLECTOR_TURRET);
-          break;
-        case "prism": // 敵G：マゼンタ（赤紫）系（GDD §6 v0.10）
-          this.drawTank(e, COLORS.PRISM_BODY, COLORS.PRISM_TRACK, COLORS.PRISM_TURRET);
-          break;
-        case "volley": // 敵V：橙赤（バーミリオン）系（GDD §6 v0.14）
-          this.drawTank(e, COLORS.VOLLEY_BODY, COLORS.VOLLEY_TRACK, COLORS.VOLLEY_TURRET);
-          break;
-        case "mortar": // 敵M：深緑（オリーブ）系
-          this.drawTank(e, COLORS.MORTAR_BODY, COLORS.MORTAR_TRACK, COLORS.MORTAR_TURRET);
-          break;
-        case "shielder": // 敵S：鋼青系＋盾の弧（守っている向きが一目で分かるように描く）
-          this.drawTank(e, COLORS.SHIELDER_BODY, COLORS.SHIELDER_TRACK, COLORS.SHIELDER_TURRET);
-          this.drawShield(e);
-          break;
-        case "chaser": // 敵F：白銀系（GDD §6 v0.9）
-          this.drawTank(e, COLORS.CHASER_BODY, COLORS.CHASER_TRACK, COLORS.CHASER_TURRET);
-          break;
-      }
+      const col = ENEMY_DEFS[e.kind].colors;
+      this.drawTank(e, col.body, col.track, col.turret);
+      // 敵S「シールダー」だけは盾の弧も描く（守っている向きが一目で分かるように）
+      if (e.kind === "shielder") this.drawShield(e);
     }
     for (const p of world.players) {
       if (!p.alive) continue;
@@ -814,28 +792,38 @@ export class GameScene extends Phaser.Scene {
           "R またはクリックでタイトルへ";
     }
     const showOverlay = title !== "";
-    // 全クリア画面はタイム一覧が長いため上寄せ・等幅小フォントに切り替える（GDD §8.5）
+    // 全クリア画面はタイム一覧が長いため上寄せ・等幅小フォントに切り替える（GDD §8.5）。
+    // setFontSize/setLineSpacing/setColor は Phaser 側に「同じ値なら無視」の判定がなく、
+    // 呼ぶたびに Text の再描画＋テクスチャ再アップロードが走る（全クリア画面は最大52行）。
+    // そのためレイアウト・色は**変わったフレームだけ**適用する。
     const isAllClearScreen = !this.paused && world.status === "allclear";
-    if (isAllClearScreen) {
-      this.overlayTitle.setY(64);
-      this.overlaySub
-        .setY(104)
-        .setOrigin(0.5, 0)
-        .setFontFamily(MONO_FONT)
-        .setFontSize(15)
-        .setLineSpacing(5);
-    } else {
-      this.overlayTitle.setY(h / 2 - 18);
-      this.overlaySub
-        .setY(h / 2 + 26)
-        .setOrigin(0.5, 0.5)
-        .setFontFamily("sans-serif")
-        .setFontSize(16)
-        .setLineSpacing(0);
+    if (isAllClearScreen !== this.overlayLayoutIsAllClear) {
+      this.overlayLayoutIsAllClear = isAllClearScreen;
+      if (isAllClearScreen) {
+        this.overlayTitle.setY(64);
+        this.overlaySub
+          .setY(104)
+          .setOrigin(0.5, 0)
+          .setFontFamily(MONO_FONT)
+          .setFontSize(15)
+          .setLineSpacing(5);
+      } else {
+        this.overlayTitle.setY(h / 2 - 18);
+        this.overlaySub
+          .setY(h / 2 + 26)
+          .setOrigin(0.5, 0.5)
+          .setFontFamily("sans-serif")
+          .setFontSize(16)
+          .setLineSpacing(0);
+      }
+    }
+    if (subColor !== this.overlaySubColor) {
+      this.overlaySubColor = subColor;
+      this.overlaySub.setColor(subColor);
     }
     this.overlayGfx.setVisible(showOverlay);
     this.overlayTitle.setVisible(showOverlay).setText(title);
-    this.overlaySub.setVisible(showOverlay).setText(sub).setColor(subColor);
+    this.overlaySub.setVisible(showOverlay).setText(sub);
 
     // 仮想コントロール（タッチ検知時のみ。GDD §3.5）
     this.drawTouchUi();

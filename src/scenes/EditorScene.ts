@@ -25,45 +25,37 @@ import {
   setTile,
   validateStage,
 } from "../core/editor";
+import type { EnemyChar } from "../core/enemyKinds";
+import { ENEMY_DEF_BY_CHAR } from "../core/enemyRegistry";
 import { safeLocalStorageStore } from "../core/records";
 
-/** パレットの表示ラベル（タイル記号と同順） */
-const TILE_LABELS: Record<EditorTile, string> = {
+/** 非敵タイルの表示ラベル（敵は記号から「敵A」…を機械的に作る） */
+const BASE_LABELS: Record<string, string> = {
   ".": "床",
   "#": "壁",
   X: "X壁",
   H: "穴",
   P: "自機",
-  A: "敵A",
-  B: "敵B",
-  C: "敵C",
-  D: "敵D",
-  E: "敵E",
-  F: "敵F",
-  G: "敵G",
-  S: "敵S",
-  V: "敵V",
-  M: "敵M",
 };
 
-/** タイルの塗り色（盤面・パレット共通。戦車系は本体色で示す） */
-const TILE_COLORS: Record<EditorTile, number> = {
+/** 非敵タイルの塗り色（敵は enemyRegistry の本体色をそのまま使う） */
+const BASE_COLORS: Record<string, number> = {
   ".": COLORS.FLOOR,
   "#": COLORS.WALL,
   X: COLORS.WALL_X,
   H: COLORS.HOLE,
   P: COLORS.PLAYER_BODY,
-  A: COLORS.ENEMY_BODY,
-  B: COLORS.ROVER_BODY,
-  C: COLORS.SNIPER_BODY,
-  D: COLORS.MINELAYER_BODY,
-  E: COLORS.REFLECTOR_BODY,
-  F: COLORS.CHASER_BODY,
-  G: COLORS.PRISM_BODY,
-  S: COLORS.SHIELDER_BODY,
-  V: COLORS.VOLLEY_BODY,
-  M: COLORS.MORTAR_BODY,
 };
+
+/** パレットの表示ラベル（タイル記号と同順） */
+const TILE_LABELS = Object.fromEntries(
+  EDITOR_TILES.map((t) => [t, BASE_LABELS[t] ?? `敵${t}`]),
+) as Record<EditorTile, string>;
+
+/** タイルの塗り色（盤面・パレット共通。戦車系は本体色で示す） */
+const TILE_COLORS = Object.fromEntries(
+  EDITOR_TILES.map((t) => [t, BASE_COLORS[t] ?? ENEMY_DEF_BY_CHAR[t as EnemyChar].colors.body]),
+) as Record<EditorTile, number>;
 
 export class EditorScene extends Phaser.Scene {
   private grid: string[][] = [];

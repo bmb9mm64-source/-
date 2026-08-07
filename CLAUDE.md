@@ -42,6 +42,11 @@ docs/gdd.md          … ゲームデザインドキュメント（仕様の一�
 docs/decisions/      … 意思決定記録（ADR形式、必要になったら作成）
 prototype/           … Phase 1 の Canvas 1ファイル試作
 src/                 … 本実装（Phaser + TS）。core/ は Phaser 非依存の純粋ロジック
+                       敵を1種増やすときに触るのは原則この4か所だけ：
+                         core/enemyKinds.ts    … ステージ記号と種類の対応（唯一の定義）
+                         core/<敵>.ts          … その敵固有のAI（共通部品は enemyAi.ts / turretAi.ts）
+                         core/enemyRegistry.ts … 生成・更新・配色の1エントリ
+                         config/balance.ts     … 調整値と配色
 tests/               … Vitest の単体テスト（ミッションの機械検証を含む）
 scripts/             … 開発用ツール（generateMissions.ts＝M17〜M50 の生成器。ゲーム本体からは import しない）
 index.html / package.json / tsconfig.json / vite.config.ts … ビルド構成

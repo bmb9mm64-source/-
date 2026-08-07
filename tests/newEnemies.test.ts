@@ -160,7 +160,27 @@ describe("敵M「ボマー」：榴弾は反射せず炸裂する", () => {
     const livesBefore = world.lives;
     world.update(1 / 60, [idlePlayerInput()]);
     expect(p.alive || world.lives < livesBefore).toBe(true);
-    expect(world.lastExplosions.length + world.events.filter((e) => e === "mineExploded").length)
-      .toBeGreaterThan(0);
+    expect(world.events.filter((e) => e === "mineExploded").length).toBeGreaterThan(0);
+  });
+
+  it("榴弾の炸裂座標が lastExplosions に残る（爆風演出・画面揺れの入力。GDD §8.5）", () => {
+    // 地雷の更新結果で lastExplosions を上書きすると、榴弾の爆発だけ演出が出なくなる
+    const world = new GameWorld([missionWith("M")]);
+    world.update(2.1, [idlePlayerInput()]);
+    const p = world.player;
+    world.bullets.push(
+      makeBullet({
+        x: p.x + 60, // プレイヤーには当たらない位置で炸裂させる
+        y: p.y,
+        vx: 0,
+        vy: 0,
+        ownerIsPlayer: false,
+        fuse: 0.01,
+        blastRadius: BALANCE.BULLET.SHELL_BLAST_RADIUS,
+        armed: true,
+      }),
+    );
+    world.update(1 / 60, [idlePlayerInput()]);
+    expect(world.lastExplosions).toContainEqual({ x: p.x + 60, y: p.y });
   });
 });

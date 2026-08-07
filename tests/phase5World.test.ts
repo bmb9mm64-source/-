@@ -31,16 +31,16 @@ function skipBanner(world: GameWorld): void {
 describe("パーサ：記号 E / F（GDD §7 v0.9）", () => {
   it("E はリフレクター・F はチェイサーの初期位置として解釈され、タイルは床に置換される", () => {
     const stage = parseStage(["#######", "#P.E.F#", "#######"], { cols: 7, rows: 3 });
-    expect(stage.reflectorSpawns).toEqual([{ x: 3 * T + T / 2, y: T + T / 2 }]);
-    expect(stage.chaserSpawns).toEqual([{ x: 5 * T + T / 2, y: T + T / 2 }]);
+    expect(stage.spawns.reflector).toEqual([{ x: 3 * T + T / 2, y: T + T / 2 }]);
+    expect(stage.spawns.chaser).toEqual([{ x: 5 * T + T / 2, y: T + T / 2 }]);
     expect(stage.grid[1]![3]).toBe("."); // E は床扱い
     expect(stage.grid[1]![5]).toBe("."); // F は床扱い
   });
 
   it("E / F が無いステージでは空配列になる（既存ステージの互換）", () => {
     const stage = parseStage(["#####", "#P.A#", "#####"], { cols: 5, rows: 3 });
-    expect(stage.reflectorSpawns).toEqual([]);
-    expect(stage.chaserSpawns).toEqual([]);
+    expect(stage.spawns.reflector).toEqual([]);
+    expect(stage.spawns.chaser).toEqual([]);
   });
 });
 

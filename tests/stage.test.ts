@@ -35,7 +35,7 @@ describe("ステージパーサ", () => {
 
   it("A（セントリー）を全て抽出し床に置換する", () => {
     // A はタイル (7,3) と (20,3) → 中心 (240,112)・(656,112)
-    expect(stage.sentrySpawns).toEqual([
+    expect(stage.spawns.sentry).toEqual([
       { x: 240, y: 112 },
       { x: 656, y: 112 },
     ]);
@@ -49,7 +49,7 @@ describe("ステージパーサ", () => {
       { cols: 5, rows: 4 },
     );
     // B はタイル (3,1) と (1,2) → 中心 (112,48)・(48,80)
-    expect(s.roverSpawns).toEqual([
+    expect(s.spawns.rover).toEqual([
       { x: 112, y: 48 },
       { x: 48, y: 80 },
     ]);
@@ -58,7 +58,7 @@ describe("ステージパーサ", () => {
   });
 
   it("B が無いステージでは roverSpawns は空配列になる", () => {
-    expect(stage.roverSpawns).toEqual([]);
+    expect(stage.spawns.rover).toEqual([]);
   });
 
   it("C（スナイパー）・D（マインレイヤー）を全て抽出し床に置換する（GDD §7 v0.6）", () => {
@@ -67,12 +67,12 @@ describe("ステージパーサ", () => {
       { cols: 5, rows: 5 },
     );
     // C はタイル (3,1)・(3,2) → 中心 (112,48)・(112,80)
-    expect(s.sniperSpawns).toEqual([
+    expect(s.spawns.sniper).toEqual([
       { x: 112, y: 48 },
       { x: 112, y: 80 },
     ]);
     // D はタイル (1,2)・(2,3) → 中心 (48,80)・(80,112)
-    expect(s.minelayerSpawns).toEqual([
+    expect(s.spawns.minelayer).toEqual([
       { x: 48, y: 80 },
       { x: 80, y: 112 },
     ]);
@@ -83,8 +83,8 @@ describe("ステージパーサ", () => {
   });
 
   it("C/D が無いステージでは sniperSpawns / minelayerSpawns は空配列になる", () => {
-    expect(stage.sniperSpawns).toEqual([]);
-    expect(stage.minelayerSpawns).toEqual([]);
+    expect(stage.spawns.sniper).toEqual([]);
+    expect(stage.spawns.minelayer).toEqual([]);
   });
 
   it("行数・列数が不正なら例外を投げる", () => {

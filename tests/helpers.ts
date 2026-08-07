@@ -18,7 +18,7 @@ export function makeBullet(partial: Partial<Bullet>): Bullet {
     vy: 0,
     radius: 4,
     bounces: 0,
-    owner: {},
+    owner: { x: 0, y: 0 }, // 実体の戦車ではないダミーの発射者
     ownerIsPlayer: false,
     armed: true,
     dead: false,

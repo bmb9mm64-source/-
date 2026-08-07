@@ -4,31 +4,26 @@
  *   . 床（通行可・弾通過）   # 恒久壁（通行不可・弾反射）
  *   X 破壊可能壁（通行不可・弾は消滅＝反射しない）
  *   H 穴（戦車不可・弾は上を通過）
- *   P プレイヤー初期位置（床扱い）   A 敵A「セントリー」（床扱い）
- *   B 敵B「ローバー」（床扱い）      C 敵C「スナイパー」（床扱い）
- *   D 敵D「マインレイヤー」（床扱い）
- *   E 敵E「リフレクター」（床扱い）  F 敵F「チェイサー」（床扱い）（GDD §7 v0.9）
+ *   P プレイヤー初期位置（床扱い）
+ *   敵の記号（A〜G・S・V・M。いずれも床扱い）は enemyKinds.ts に一覧がある
  */
 import { BALANCE } from "../config/balance";
+import {
+  emptyEnemySpawns,
+  ENEMY_KIND_BY_CHAR,
+  type EnemySpawns,
+  isEnemyChar,
+} from "./enemyKinds";
 import type { Vec2 } from "./types";
 
 /** 解析済みステージ */
 export interface ParsedStage {
-  grid: string[][]; // grid[row][col] のタイル文字（P/A/B/C/D/E/F は '.' に置換済み）
+  grid: string[][]; // grid[row][col] のタイル文字（P と敵記号は '.' に置換済み）
   cols: number;
   rows: number;
   tile: number; // 1タイルの辺長 [px]
   playerSpawn: Vec2; // プレイヤー初期位置（タイル中心の px 座標）
-  sentrySpawns: Vec2[]; // 敵A「セントリー」の初期位置
-  roverSpawns: Vec2[]; // 敵B「ローバー」の初期位置
-  sniperSpawns: Vec2[]; // 敵C「スナイパー」の初期位置（GDD §7 v0.6）
-  minelayerSpawns: Vec2[]; // 敵D「マインレイヤー」の初期位置（GDD §7 v0.6）
-  reflectorSpawns: Vec2[]; // 敵E「リフレクター」の初期位置（GDD §7 v0.9）
-  chaserSpawns: Vec2[]; // 敵F「チェイサー」の初期位置（GDD §7 v0.9）
-  prismSpawns: Vec2[]; // 敵G「プリズム」の初期位置（GDD §7 v0.10）
-  shielderSpawns: Vec2[]; // 敵S「シールダー」の初期位置（GDD §7 v0.14）
-  volleySpawns: Vec2[]; // 敵V「バースター」の初期位置（GDD §7 v0.14）
-  mortarSpawns: Vec2[]; // 敵M「ボマー」の初期位置（GDD §7 v0.14）
+  spawns: EnemySpawns; // 敵の種類ごとの初期位置（例：spawns.sentry）
 }
 
 /** パーサのオプション（省略時は GDD §7 の正規サイズ。テストでは小さい盤面を渡せる） */
@@ -49,16 +44,7 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
   }
   const grid: string[][] = [];
   let playerSpawn: Vec2 | null = null;
-  const sentrySpawns: Vec2[] = [];
-  const roverSpawns: Vec2[] = [];
-  const sniperSpawns: Vec2[] = [];
-  const minelayerSpawns: Vec2[] = [];
-  const reflectorSpawns: Vec2[] = [];
-  const chaserSpawns: Vec2[] = [];
-  const prismSpawns: Vec2[] = [];
-  const shielderSpawns: Vec2[] = [];
-  const volleySpawns: Vec2[] = [];
-  const mortarSpawns: Vec2[] = [];
+  const spawns = emptyEnemySpawns();
 
   for (let r = 0; r < lines.length; r++) {
     const rowStr = lines[r]!;
@@ -73,35 +59,8 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
       if (ch === "P") {
         playerSpawn = { x: cx, y: cy };
         ch = ".";
-      } else if (ch === "A") {
-        sentrySpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "B") {
-        roverSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "C") {
-        sniperSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "D") {
-        minelayerSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "E") {
-        reflectorSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "F") {
-        chaserSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "G") {
-        prismSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "S") {
-        shielderSpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "V") {
-        volleySpawns.push({ x: cx, y: cy });
-        ch = ".";
-      } else if (ch === "M") {
-        mortarSpawns.push({ x: cx, y: cy });
+      } else if (isEnemyChar(ch)) {
+        spawns[ENEMY_KIND_BY_CHAR[ch]].push({ x: cx, y: cy });
         ch = ".";
       }
       line.push(ch);
@@ -109,23 +68,7 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
     grid.push(line);
   }
   if (!playerSpawn) throw new Error("ステージに P（プレイヤー初期位置）がありません");
-  return {
-    grid,
-    cols,
-    rows,
-    tile,
-    playerSpawn,
-    sentrySpawns,
-    roverSpawns,
-    sniperSpawns,
-    minelayerSpawns,
-    reflectorSpawns,
-    chaserSpawns,
-    prismSpawns,
-    shielderSpawns,
-    volleySpawns,
-    mortarSpawns,
-  };
+  return { grid, cols, rows, tile, playerSpawn, spawns };
 }
 
 /**

@@ -72,7 +72,7 @@ describe("リフレクターの弾（反射上限2回。GDD §6 v0.9）", () => 
     const seen: { bounces: number; dead: boolean }[] = [];
     for (let i = 0; i < 200 && !b.dead; i++) {
       const prev = b.bounces;
-      updateBullet(b, 0.01, corridor); // maxBounces 引数は渡さない＝弾固有の2回が使われる
+      updateBullet(b, 0.01, corridor); // 反射上限は弾自身が持つ（敵E弾＝2回）
       if (b.bounces > prev) seen.push({ bounces: b.bounces, dead: b.dead });
     }
     expect(seen).toEqual([
