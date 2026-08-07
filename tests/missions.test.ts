@@ -14,12 +14,20 @@ import { findNearbyFloor, parseStage, tileAt } from "../src/core/stage";
 import { ALL_MISSIONS } from "../src/stages/allMissions";
 
 describe("本編ミッション構成", () => {
-  it("ミッションは15面ある（MVP 5面＋第2弾 5面＋Phase 5 5面）", () => {
-    expect(ALL_MISSIONS).toHaveLength(15);
+  it("ミッションは16面ある（MVP 5面＋第2弾 5面＋Phase 5 5面＋M16）", () => {
+    expect(ALL_MISSIONS).toHaveLength(16);
   });
 
   it("敵構成が GDD §7 の表と一致する", () => {
-    const expected = [
+    const expected: {
+      sentries: number;
+      rovers: number;
+      snipers: number;
+      minelayers: number;
+      reflectors: number;
+      chasers: number;
+      prisms?: number;
+    }[] = [
       { sentries: 1, rovers: 0, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M1
       { sentries: 2, rovers: 0, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M2
       { sentries: 0, rovers: 1, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0 }, // M3
@@ -35,6 +43,7 @@ describe("本編ミッション構成", () => {
       { sentries: 0, rovers: 1, snipers: 1, minelayers: 0, reflectors: 1, chasers: 0 }, // M13
       { sentries: 2, rovers: 0, snipers: 0, minelayers: 1, reflectors: 0, chasers: 1 }, // M14
       { sentries: 0, rovers: 1, snipers: 1, minelayers: 1, reflectors: 1, chasers: 1 }, // M15
+      { sentries: 1, rovers: 1, snipers: 0, minelayers: 0, reflectors: 0, chasers: 0, prisms: 1 }, // M16
     ];
     ALL_MISSIONS.forEach((m, i) => {
       const stage = parseStage(m.grid);
@@ -48,20 +57,21 @@ describe("本編ミッション構成", () => {
         expected[i]!.reflectors,
       );
       expect(stage.chaserSpawns, `${m.name} のチェイサー数`).toHaveLength(expected[i]!.chasers);
+      expect(stage.prismSpawns, `${m.name} のプリズム数`).toHaveLength(expected[i]!.prisms ?? 0);
     });
   });
 
-  it("E（リフレクター）は開幕時、P と 2P 位置への外周壁1回反射の射線も持たない（GDD §7 v0.9）", () => {
-    // E は跳弾狙撃を常時100%使うため、開幕グレース明けの即狙撃を防ぐ設計基準
+  it("E・G（常時跳弾狙撃の砲台）は開幕時、P と 2P 位置への外周壁1回反射の射線も持たない（GDD §7 v0.9/v0.10）", () => {
+    // E/G は跳弾狙撃を常時100%使うため、開幕グレース明けの即狙撃を防ぐ設計基準
     for (const m of ALL_MISSIONS) {
       const stage = parseStage(m.grid);
       const p1 = stage.playerSpawn;
       const p2 = findNearbyFloor(stage, p1);
-      for (const e of stage.reflectorSpawns) {
+      for (const e of [...stage.reflectorSpawns, ...stage.prismSpawns]) {
         for (const p of [p1, p2]) {
           expect(
             findOuterWallRicochet(stage, e.x, e.y, p.x, p.y),
-            `${m.name}: E(${e.x},${e.y})→(${p.x},${p.y}) の反射射線`,
+            `${m.name}: E/G(${e.x},${e.y})→(${p.x},${p.y}) の反射射線`,
           ).toBeNull();
         }
       }

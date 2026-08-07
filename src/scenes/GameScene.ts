@@ -58,6 +58,8 @@ export class GameScene extends Phaser.Scene {
   private customPlay = false; // エディタからのテストプレイ（記録対象外・終了後はエディタへ。GDD §12.7）
   private paused = false; // ポーズはシーン側の責務（ポーズ中は world.update を呼ばない）
   private fireRequested = false; // 1P：1クリック1発の発射要求フラグ
+  private fireBuffer1 = 0; // 1P：射撃の先行入力バッファ残り時間 [s]（GDD §3 v0.10）
+  private fireBuffer2 = 0; // 2P：同上（キーボード/パッド共通）
   private mineRequested = false; // 1P：1押下1設置の地雷要求フラグ
   private fire2Requested = false; // 2P（キーボード Enter）
   private mine2Requested = false; // 2P（キーボード 右Shift）
@@ -124,6 +126,8 @@ export class GameScene extends Phaser.Scene {
     this.mineRequested = false;
     this.fire2Requested = false;
     this.mine2Requested = false;
+    this.fireBuffer1 = 0;
+    this.fireBuffer2 = 0;
     this.gamepad = new GamepadPoller();
     this.explosionsFx = [];
     this.particles = [];
@@ -266,8 +270,10 @@ export class GameScene extends Phaser.Scene {
         this.scene.start("TitleScene");
         return;
       }
-      if (pointer.button === 0) this.fireRequested = true;
-      else if (pointer.button === 2) this.mineRequested = true;
+      if (pointer.button === 0) {
+        this.fireRequested = true;
+        this.fireBuffer1 = BALANCE.PLAYER.FIRE_BUFFER; // クールダウン中でも短時間予約（先行入力。GDD §3 v0.10）
+      } else if (pointer.button === 2) this.mineRequested = true;
     });
   }
 
@@ -305,12 +311,20 @@ export class GameScene extends Phaser.Scene {
         moveX: (this.keys.d.isDown ? 1 : 0) - (this.keys.a.isDown ? 1 : 0),
         moveY: (this.keys.s.isDown ? 1 : 0) - (this.keys.w.isDown ? 1 : 0),
         aim: { mode: "cursor", x: pointer.worldX, y: pointer.worldY },
-        fire: this.fireRequested,
+        fire: this.fireRequested || this.fireBuffer1 > 0, // 先行入力バッファ（GDD §3 v0.10）
         placeMine: this.mineRequested,
       };
       const inputs: PlayerInput[] = [input1];
-      if (this.playerCount === 2) inputs.push(this.buildP2Input());
+      if (this.playerCount === 2) {
+        const input2 = this.buildP2Input();
+        if (input2.fire) this.fireBuffer2 = BALANCE.PLAYER.FIRE_BUFFER; // パッド/キーボード共通で予約
+        input2.fire = input2.fire || this.fireBuffer2 > 0;
+        inputs.push(input2);
+      }
       this.world.update(dt, inputs);
+      // 先行入力バッファの消化（FIRE_INTERVAL 未満なので1クリックで2発は出ない）
+      this.fireBuffer1 = Math.max(0, this.fireBuffer1 - dt);
+      this.fireBuffer2 = Math.max(0, this.fireBuffer2 - dt);
 
       // ワールドの出来事を効果音・演出・記録更新に変換する
       for (const ev of this.world.events) {
@@ -571,6 +585,9 @@ export class GameScene extends Phaser.Scene {
           break;
         case "reflector": // 敵E：青緑（シアン）系（GDD §6 v0.9）
           this.drawTank(e, COLORS.REFLECTOR_BODY, COLORS.REFLECTOR_TRACK, COLORS.REFLECTOR_TURRET);
+          break;
+        case "prism": // 敵G：マゼンタ（赤紫）系（GDD §6 v0.10）
+          this.drawTank(e, COLORS.PRISM_BODY, COLORS.PRISM_TRACK, COLORS.PRISM_TURRET);
           break;
         case "chaser": // 敵F：白銀系（GDD §6 v0.9）
           this.drawTank(e, COLORS.CHASER_BODY, COLORS.CHASER_TRACK, COLORS.CHASER_TURRET);

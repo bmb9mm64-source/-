@@ -29,6 +29,7 @@ import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
 import { type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
 import { createMinelayer, type MinelayerTank, updateMinelayer } from "./minelayer";
+import { createPrism, type PrismTank, updatePrism } from "./prism";
 import { createReflector, type ReflectorTank, updateReflector } from "./reflector";
 import { createRover, type RoverTank, updateRover } from "./rover";
 import { createSentry, type SentryTank, updateSentry } from "./sentry";
@@ -41,7 +42,14 @@ import type { PlayerTank } from "./types";
 export type GameStatus = "banner" | "playing" | "gameover" | "allclear";
 
 /** 敵戦車（セントリー／ローバー／スナイパー／マインレイヤー／リフレクター／チェイサー） */
-export type EnemyTank = SentryTank | RoverTank | SniperTank | MinelayerTank | ReflectorTank | ChaserTank;
+export type EnemyTank =
+  | SentryTank
+  | RoverTank
+  | SniperTank
+  | MinelayerTank
+  | ReflectorTank
+  | ChaserTank
+  | PrismTank;
 
 /** ミッション定義（src/stages/missions.ts の要素と互換） */
 export interface MissionDef {
@@ -151,6 +159,7 @@ export class GameWorld {
       ...this.stage.minelayerSpawns.map((sp) => createMinelayer(sp.x, sp.y, this.rng, this.mods)),
       ...this.stage.reflectorSpawns.map((sp) => createReflector(sp.x, sp.y, this.rng, this.mods)),
       ...this.stage.chaserSpawns.map((sp) => createChaser(sp.x, sp.y, this.rng, this.mods)),
+      ...this.stage.prismSpawns.map((sp) => createPrism(sp.x, sp.y, this.rng, this.mods)),
     ];
     this.bullets = [];
     this.mines = [];
@@ -305,6 +314,17 @@ export class GameWorld {
           // 弾は REFLECTOR_BULLET_CFG（反射上限2回を弾自身が持つ）で生成されるため、
           // 下の弾更新ループは特別扱い不要（updateBullet が b.maxBounces を優先する）
           updateReflector(e, dt, {
+            players: this.players,
+            bullets: this.bullets,
+            stage: this.stage,
+            grace: this.grace,
+            rng: this.rng,
+            mods: this.mods,
+          });
+          break;
+        case "prism":
+          // 弾は PRISM_BULLET_CFG（反射上限3回を弾自身が持つ）。リフレクターと同じ扱い
+          updatePrism(e, dt, {
             players: this.players,
             bullets: this.bullets,
             stage: this.stage,

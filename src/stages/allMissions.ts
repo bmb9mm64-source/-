@@ -6,9 +6,11 @@
 import { MISSIONS } from "./missions";
 import { MISSIONS_EXT } from "./missionsExt";
 import { MISSIONS_EXT2 } from "./missionsExt2";
+import { MISSIONS_EXT3 } from "./missionsExt3";
 
 export const ALL_MISSIONS: { name: string; grid: string[] }[] = [
   ...MISSIONS,
   ...MISSIONS_EXT,
   ...MISSIONS_EXT2,
+  ...MISSIONS_EXT3,
 ];

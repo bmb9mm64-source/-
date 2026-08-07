@@ -69,6 +69,14 @@ export const REFLECTOR_BULLET_CFG: BulletSpawnConfig = {
   MAX_BOUNCES: BALANCE.BULLET.REFLECTOR_MAX_BOUNCES,
 };
 
+/** 敵G「プリズム」弾の生成設定（GDD §6 v0.10：280px/s・この弾だけ反射上限3回） */
+export const PRISM_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.PRISM_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+  MAX_BOUNCES: BALANCE.BULLET.PRISM_MAX_BOUNCES,
+};
+
 /**
  * 敵弾速の難易度倍率を適用した生成設定を返す（GDD §8.3。倍率1.0はそのまま共有して割り当てを避ける）。
  * プレイヤー弾には使わない（プレイヤー性能は難易度で不変）。

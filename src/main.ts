@@ -10,9 +10,15 @@ import { TitleScene } from "./scenes/TitleScene";
 new Phaser.Game({
   type: Phaser.AUTO,
   parent: "app",
-  width: BALANCE.TILE * BALANCE.COLS, // 800px
+  width: BALANCE.TILE * BALANCE.COLS, // 800px（論理解像度。座標系は従来のまま）
   height: BALANCE.TILE * BALANCE.ROWS, // 544px
   backgroundColor: COLORS.FLOOR_CSS,
+  scale: {
+    // ウィンドウに合わせて拡大表示（v0.10。アスペクト比維持・中央寄せ。入力座標は Phaser が逆変換する）
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    expandParent: true,
+  },
   scene: [TitleScene, GameScene, EditorScene],
   // ゲームロジックは core 側でデルタタイム更新するため物理エンジンは使わない
 });

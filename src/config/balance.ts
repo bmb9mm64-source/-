@@ -16,6 +16,7 @@ export const BALANCE = {
     SIZE: 28, // 車体当たり判定（正方形の辺長）[px]
     RADIUS: 14, // 対弾用の円近似半径 [px]（28×28 の円近似）
     FIRE_INTERVAL: 0.15, // 発射間隔 [s]（GDD §4 v0.9.1：0.3→0.15。連射速度2倍）
+    FIRE_BUFFER: 0.12, // 射撃の先行入力バッファ [s]（GDD §3 v0.10。FIRE_INTERVAL 未満にして1クリック2発を防ぐ）
     MAX_BULLETS: 5, // 同時発射数上限（プレイヤーごとに独立。GDD §12.5）
     BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用。GDD「滑らかに回転」）
     TURRET_TURN_SPEED_KEYS: (540 * Math.PI) / 180, // 2P キーボード照準（IJKL）時の砲塔回転追従速度 [rad/s]（GDD §12.5「押した方向へ回転追従」。速度は本ファイルの調整値）
@@ -34,6 +35,8 @@ export const BALANCE = {
     SNIPER_BULLET_SPEED: 340, // 敵C「スナイパー」弾の弾速 [px/s]（GDD §6 v0.6。反射上限は共通の1回）
     REFLECTOR_BULLET_SPEED: 300, // 敵E「リフレクター」弾の弾速 [px/s]（GDD §6 v0.9）
     REFLECTOR_MAX_BOUNCES: 2, // 敵E弾の反射上限（この敵の弾だけ2回跳ねる。GDD §6 v0.9）
+    PRISM_BULLET_SPEED: 280, // 敵G「プリズム」弾の弾速 [px/s]（GDD §6 v0.10）
+    PRISM_MAX_BOUNCES: 3, // 敵G弾の反射上限（3回跳ねて盤面を長く飛び回る。GDD §6 v0.10）
     RADIUS: 4, // 弾の当たり判定半径 [px]
     MAX_BOUNCES: 1, // 反射上限（2回目の壁接触で消滅）
     MUZZLE_OFFSET: 22, // 砲口オフセット [px]（車体半径14+弾半径4 より外側 → 発射直後の自爆なし）
@@ -101,6 +104,21 @@ export const BALANCE = {
     MAX_BULLETS: 2, // 同時発射数上限（GDD §6 v0.9：同時2発）
     FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
     // 跳弾狙撃は難易度によらず常時100%（GDD §6 v0.9）。直接射線があれば直接射撃を優先
+  },
+
+  PRISM: {
+    // 敵G「プリズム」（多重反射砲台型。GDD §6 v0.10。リフレクターと同構造）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (90 * Math.PI) / 180, // 砲塔回転速度 90°/s
+    JITTER_MAX: (1 * Math.PI) / 180, // 照準の最大ブレ（±1°）
+    JITTER_INTERVAL_MIN: 0.4, // ブレ量を引き直す間隔（最小）[s]
+    JITTER_INTERVAL_MAX: 1.2, // ブレ量を引き直す間隔（最大）[s]
+    FIRE_INTERVAL_MEAN: 3.0, // 発射間隔の平均 [s]（難易度倍率の対象）
+    FIRE_INTERVAL_VAR: 1.0, // 発射間隔のゆらぎ幅（±）[s]
+    MAX_BULLETS: 1, // 同時発射数上限（3回反射弾が長く残るため1発）
+    FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]
+    // 跳弾狙撃は難易度によらず常時100%（リフレクターと同様。GDD §6 v0.10）
   },
 
   CHASER: {
@@ -259,6 +277,9 @@ export const COLORS = {
   CHASER_BODY: 0xaab4bf, // 敵F「チェイサー」は白銀系のオリジナル配色（GDD §6 v0.9）
   CHASER_TRACK: 0x6e7883,
   CHASER_TURRET: 0xf2f6fa,
+  PRISM_BODY: 0xd44fb0, // 敵G「プリズム」はマゼンタ（赤紫）系のオリジナル配色（GDD §6 v0.10）
+  PRISM_TRACK: 0x8f2f77,
+  PRISM_TURRET: 0xffb3e6,
   WALL_X: 0x8a6d4c, // 破壊可能壁 X（土嚢風の茶系。恒久壁と区別）
   WALL_X_EDGE: 0xa88860,
   MINE: 0x3a3f4d, // 地雷本体（プレイヤー設置）

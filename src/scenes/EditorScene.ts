@@ -39,6 +39,7 @@ const TILE_LABELS: Record<EditorTile, string> = {
   D: "敵D",
   E: "敵E",
   F: "敵F",
+  G: "敵G",
 };
 
 /** タイルの塗り色（盤面・パレット共通。戦車系は本体色で示す） */
@@ -54,6 +55,7 @@ const TILE_COLORS: Record<EditorTile, number> = {
   D: COLORS.MINELAYER_BODY,
   E: COLORS.REFLECTOR_BODY,
   F: COLORS.CHASER_BODY,
+  G: COLORS.PRISM_BODY,
 };
 
 export class EditorScene extends Phaser.Scene {

@@ -10,12 +10,12 @@ import { hasLineOfSight } from "./los";
 import type { RecordStore } from "./records";
 import { findNearbyFloor, parseStage } from "./stage";
 
-/** エディタで扱えるタイル記号（パレットの並び順。E/F は GDD §7 v0.9 の敵記号） */
-export const EDITOR_TILES = [".", "#", "X", "H", "P", "A", "B", "C", "D", "E", "F"] as const;
+/** エディタで扱えるタイル記号（パレットの並び順。E/F は v0.9、G は v0.10 の敵記号） */
+export const EDITOR_TILES = [".", "#", "X", "H", "P", "A", "B", "C", "D", "E", "F", "G"] as const;
 export type EditorTile = (typeof EDITOR_TILES)[number];
 
 /** 敵記号（合計12体上限のカウント対象） */
-const ENEMY_CHARS = new Set(["A", "B", "C", "D", "E", "F"]);
+const ENEMY_CHARS = new Set(["A", "B", "C", "D", "E", "F", "G"]);
 
 /** 敵の合計配置上限（GDD §12.7：性能と難易度の上限） */
 export const EDITOR_MAX_ENEMIES = 12;
@@ -102,7 +102,7 @@ export function validateStage(grid: readonly string[][]): StageValidation {
     errors.push("自機 P を1つ配置してください");
   }
   if (countEnemies(grid) === 0) {
-    errors.push("敵（A〜F）を1体以上配置してください");
+    errors.push("敵（A〜G）を1体以上配置してください");
   }
   if (errors.length > 0) return { errors, warnings };
 
@@ -118,6 +118,7 @@ export function validateStage(grid: readonly string[][]): StageValidation {
     ...stage.minelayerSpawns,
     ...stage.reflectorSpawns,
     ...stage.chaserSpawns,
+    ...stage.prismSpawns,
   ];
   for (const e of enemies) {
     if (hasLineOfSight(stage, stage.playerSpawn.x, stage.playerSpawn.y, e.x, e.y)) {

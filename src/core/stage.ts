@@ -25,6 +25,7 @@ export interface ParsedStage {
   minelayerSpawns: Vec2[]; // 敵D「マインレイヤー」の初期位置（GDD §7 v0.6）
   reflectorSpawns: Vec2[]; // 敵E「リフレクター」の初期位置（GDD §7 v0.9）
   chaserSpawns: Vec2[]; // 敵F「チェイサー」の初期位置（GDD §7 v0.9）
+  prismSpawns: Vec2[]; // 敵G「プリズム」の初期位置（GDD §7 v0.10）
 }
 
 /** パーサのオプション（省略時は GDD §7 の正規サイズ。テストでは小さい盤面を渡せる） */
@@ -51,6 +52,7 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
   const minelayerSpawns: Vec2[] = [];
   const reflectorSpawns: Vec2[] = [];
   const chaserSpawns: Vec2[] = [];
+  const prismSpawns: Vec2[] = [];
 
   for (let r = 0; r < lines.length; r++) {
     const rowStr = lines[r]!;
@@ -83,6 +85,9 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
       } else if (ch === "F") {
         chaserSpawns.push({ x: cx, y: cy });
         ch = ".";
+      } else if (ch === "G") {
+        prismSpawns.push({ x: cx, y: cy });
+        ch = ".";
       }
       line.push(ch);
     }
@@ -101,6 +106,7 @@ export function parseStage(lines: readonly string[], options: StageParseOptions 
     minelayerSpawns,
     reflectorSpawns,
     chaserSpawns,
+    prismSpawns,
   };
 }
 
