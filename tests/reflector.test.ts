@@ -118,8 +118,8 @@ describe("リフレクターAI（ステートマシン。GDD §6 v0.9）", () =>
 
   it("同時発射数上限は2発：自弾2発が場にある間は撃たず、1発なら撃てる", () => {
     const e = readyReflector(80, 48, rngHalf);
-    const own1: Bullet = { x: 400, y: 400, vx: 0, vy: 0, radius: 4, bounces: 0, owner: e, ownerIsPlayer: false, armed: true, dead: false };
-    const own2: Bullet = { x: 420, y: 400, vx: 0, vy: 0, radius: 4, bounces: 0, owner: e, ownerIsPlayer: false, armed: true, dead: false };
+    const own1: Bullet = { x: 400, y: 400, vx: 0, vy: 0, radius: 4, bounces: 0, owner: e, ownerIsPlayer: false, style: "normal", armed: true, dead: false };
+    const own2: Bullet = { x: 420, y: 400, vx: 0, vy: 0, radius: 4, bounces: 0, owner: e, ownerIsPlayer: false, style: "normal", armed: true, dead: false };
     const ctx = makeCtx({ bullets: [own1, own2] });
     for (let i = 0; i < 40; i++) updateReflector(e, 0.05, ctx);
     expect(ctx.bullets).toHaveLength(2); // 上限2発で撃てない

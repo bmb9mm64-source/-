@@ -18,11 +18,12 @@ import { type Bullet, liveBulletCount } from "../core/bullet";
 import { ENEMY_DEFS } from "../core/enemyRegistry";
 import { eightWayAngle, type PlayerInput } from "../core/input";
 import { liveMineCount } from "../core/mine";
-import { missileShape } from "../core/missileShape";
+import { missileShape, prismShape, sniperShape } from "../core/missileShape";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
+import { applyRenderScale, TEXT_RESOLUTION, toGameCoord } from "./renderScale";
 import { bindSceneAudio } from "./sceneAudio";
 import {
   mineButtonRect,
@@ -154,6 +155,7 @@ export class GameScene extends Phaser.Scene {
       startMission?: number; // 「続きから」で開始するミッション番号（1始まり。GDD §8.6）
     } = {},
   ): void {
+    applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
 
@@ -213,6 +215,7 @@ export class GameScene extends Phaser.Scene {
       fontSize: "15px",
       fontStyle: "bold",
       color: COLORS.HUD_CSS,
+      resolution: TEXT_RESOLUTION,
     };
     this.hudLeft = this.add.text(10, 16, "", hudStyle).setOrigin(0, 0.5).setDepth(5);
     this.hudRight = this.add.text(w - 10, 16, "", hudStyle).setOrigin(1, 0.5).setDepth(5);
@@ -239,6 +242,7 @@ export class GameScene extends Phaser.Scene {
         fontSize: "42px",
         fontStyle: "bold",
         color: COLORS.HUD_CSS,
+        resolution: TEXT_RESOLUTION,
       })
       .setOrigin(0.5)
       .setDepth(11)
@@ -248,6 +252,7 @@ export class GameScene extends Phaser.Scene {
         fontFamily: "sans-serif",
         fontSize: "16px",
         color: COLORS.HUD_CSS,
+        resolution: TEXT_RESOLUTION,
       })
       .setOrigin(0.5)
       .setDepth(11)
@@ -349,7 +354,13 @@ export class GameScene extends Phaser.Scene {
     for (const p of this.input.manager.pointers) {
       if (!p.isDown || !p.wasTouch) continue;
       this.touchMode = true;
-      points.push({ id: p.id, x: p.x, y: p.y, startX: p.downX, startY: p.downY });
+      points.push({
+        id: p.id,
+        x: toGameCoord(p.x),
+        y: toGameCoord(p.y),
+        startX: toGameCoord(p.downX),
+        startY: toGameCoord(p.downY),
+      });
     }
     if (!this.touchMode) return null;
     const w = BALANCE.TILE * BALANCE.COLS;
@@ -434,7 +445,7 @@ export class GameScene extends Phaser.Scene {
         moveY: touch && (touch.moveX !== 0 || touch.moveY !== 0) ? touch.moveY : keyY,
         aim: touch?.aim
           ? { mode: "cursor", x: touch.aim.x, y: touch.aim.y }
-          : { mode: "cursor", x: pointer.x, y: pointer.y }, // 揺れの影響を受けない画面座標
+          : { mode: "cursor", x: toGameCoord(pointer.x), y: toGameCoord(pointer.y) }, // 揺れの影響を受けない画面座標
         fire: this.fireRequested || this.fireBuffer1 > 0 || (touch?.fire ?? false), // 先行入力バッファ（GDD §3 v0.10）
         placeMine: this.mineRequested || (touch?.minePressed ?? false),
       };
@@ -695,25 +706,40 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 弾をミサイル型に描く（GDD §5「弾の見た目」v0.16。**見た目のみ**）。
-   * 形状は core/missileShape.ts が持ち（弾頭の先端＝当たり判定の円の縁、という約束を
-   * tests/missileShape.test.ts が担保する）、ここは進行方向へ回して塗るだけ。
+   * 弾を描く（GDD §5「弾の見た目」v0.16／v0.20。**見た目のみ**）。
    * 当たり判定は core 側の「中心 (x,y)・半径 b.radius の円」のままで、ここでは一切触らない。
+   * 種別（b.style）で見た目を分ける。挙動の数値からは推測しない（数値を変えると絵が変わってしまうため）。
+   */
+  private drawBullet(b: Bullet): void {
+    const gfx = this.dynGfx;
+    gfx.save();
+    gfx.translateCanvas(b.x, b.y);
+    // 速度ゼロの弾（テストで直接置いた弾など）は atan2 が 0 を返して右向きになる
+    const angle = Math.atan2(b.vy, b.vx);
+    if (b.style === "prism") {
+      this.drawPrismBullet(b); // 結晶は進行方向を持たない（自転する）
+    } else {
+      gfx.rotateCanvas(angle);
+      if (b.style === "sniper") this.drawSniperBullet(b);
+      else this.drawMissile(b);
+    }
+    gfx.restore();
+  }
+
+  /**
+   * 通常弾・榴弾：ミサイル型。
+   * 形状は core/missileShape.ts が持ち（弾頭の先端＝当たり判定の円の縁、という約束を
+   * tests/missileShape.test.ts が担保する）、ここは塗るだけ。
    */
   private drawMissile(b: Bullet): void {
     const gfx = this.dynGfx;
-    const isShell = b.fuse !== undefined; // 敵M「ボマー」の榴弾は暖色で区別する（GDD §6）
+    const isShell = b.style === "shell"; // 敵M「ボマー」の榴弾は暖色で区別する（GDD §6）
     const body = isShell ? COLORS.SHELL : COLORS.BULLET;
     const edge = isShell ? COLORS.SHELL_EDGE : COLORS.BULLET_EDGE;
     // 噴射炎は弾ごとに位相をずらして明滅させ、全弾が同時に点滅しないようにする
     const phase =
       (this.time.now / 1000) * BALANCE.FX.MISSILE_FLAME_HZ + (b.x + b.y) * MISSILE_PHASE_SCATTER;
     const shape = missileShape(b.radius, (Math.sin(phase) + 1) / 2);
-
-    gfx.save();
-    gfx.translateCanvas(b.x, b.y);
-    // 速度ゼロの弾（テストで直接置いた弾など）は atan2 が 0 を返して右向きになる
-    gfx.rotateCanvas(Math.atan2(b.vy, b.vx));
 
     gfx.fillStyle(COLORS.MISSILE_FLAME, BALANCE.FX.MISSILE_FLAME_ALPHA);
     gfx.fillTriangle(...shape.flameTri);
@@ -727,7 +753,45 @@ export class GameScene extends Phaser.Scene {
     const r = shape.bodyRect;
     gfx.fillRect(r.x, r.y, r.w, r.h);
     gfx.fillTriangle(...shape.noseTri);
-    gfx.restore();
+  }
+
+  /**
+   * 敵C「スナイパー」弾：細長い徹甲弾＋後方へ伸びる曳光（GDD §5 v0.20）。
+   * 340px/s と最速なので「速くて細い」ことが一目で分かる形にする。
+   * 形状は core/missileShape.ts が持ち、先端が当たり判定の縁に一致することをテストで担保する。
+   */
+  private drawSniperBullet(b: Bullet): void {
+    const gfx = this.dynGfx;
+    const s = sniperShape(b.radius);
+    gfx.fillStyle(COLORS.SNIPER_TRAIL, BALANCE.FX.SNIPER_TRAIL_ALPHA);
+    gfx.fillTriangle(...s.trailTri);
+    gfx.fillStyle(COLORS.SNIPER_BULLET, 1);
+    gfx.fillRect(s.bodyRect.x, s.bodyRect.y, s.bodyRect.w, s.bodyRect.h);
+    gfx.fillTriangle(...s.tipTri);
+  }
+
+  /**
+   * 敵G「プリズム」弾：自転する結晶＋残り反射回数ぶんの輪（GDD §5 v0.20）。
+   * 3回反射して盤面を長く飛び回る弾なので、「あと何回跳ねるか」を輪の数で読めるようにする。
+   * 結晶の実体は当たり判定と同じ大きさで、輪はその外側に薄く描く（実体が判定より大きく見えない）。
+   */
+  private drawPrismBullet(b: Bullet): void {
+    const gfx = this.dynGfx;
+    const spin =
+      (this.time.now / 1000) * BALANCE.FX.PRISM_SPIN + (b.x + b.y) * MISSILE_PHASE_SCATTER;
+    const left = Math.max(0, (b.maxBounces ?? BALANCE.BULLET.MAX_BOUNCES) - b.bounces);
+    const s = prismShape(b.radius, spin, left);
+
+    gfx.lineStyle(1, COLORS.PRISM_BULLET_EDGE, BALANCE.FX.PRISM_RING_ALPHA);
+    for (const rr of s.ringRadii) gfx.strokeCircle(0, 0, rr);
+
+    gfx.fillStyle(COLORS.PRISM_BULLET, 1);
+    gfx.fillPoints(
+      s.crystal.map(([x, y]) => new Phaser.Geom.Point(x, y)),
+      true,
+    );
+    gfx.lineStyle(1, COLORS.PRISM_BULLET_EDGE, 1);
+    for (const [x, y] of s.edges) gfx.lineBetween(0, 0, x, y);
   }
 
   private drawTank(tank: TankBody, body: number, track: number, turret: number): void {
@@ -800,7 +864,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // 弾（ミサイル型。当たり判定は従来どおり中心・半径 b.radius の円で、見た目は影響しない）
-    for (const b of world.bullets) this.drawMissile(b);
+    for (const b of world.bullets) this.drawBullet(b);
 
     // 爆発フラッシュ（開始半径→最終半径へ拡大しながらフェードアウト。地雷＝爆風大／撃破＝小）
     for (const fx of this.explosionsFx) {
@@ -920,8 +984,8 @@ export class GameScene extends Phaser.Scene {
     // オーバーレイ表示中（ポーズ・バナー・終了画面）は隠す。文字に重なって読めなくなるため（GDD §8 v0.17）
     if (this.paused || this.world.status !== "playing") return;
     const aim = this.lastTouch?.aim;
-    const x = aim ? aim.x : pointer.x;
-    const y = aim ? aim.y : pointer.y;
+    const x = aim ? aim.x : toGameCoord(pointer.x);
+    const y = aim ? aim.y : toGameCoord(pointer.y);
     gfx.lineStyle(1.5, COLORS.CROSSHAIR, 1);
     gfx.beginPath();
     gfx.moveTo(x - 10, y);

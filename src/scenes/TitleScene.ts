@@ -15,6 +15,7 @@ import {
   saveDifficulty,
 } from "../core/difficulty";
 import { formatTime, Records, type RecordStore, safeLocalStorageStore } from "../core/records";
+import { applyRenderScale, TEXT_RESOLUTION } from "./renderScale";
 import { bindSceneAudio } from "./sceneAudio";
 
 export class TitleScene extends Phaser.Scene {
@@ -28,6 +29,7 @@ export class TitleScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
     this.input.setDefaultCursor("default"); // タイトルでは OS カーソルを表示
@@ -62,7 +64,7 @@ export class TitleScene extends Phaser.Scene {
     drawSymbol(w / 2 - 46, COLORS.PLAYER_BODY, COLORS.PLAYER_TRACK, COLORS.PLAYER_TURRET);
     drawSymbol(w / 2 + 46, COLORS.P2_BODY, COLORS.P2_TRACK, COLORS.P2_TURRET);
 
-    const textStyle = { fontFamily: "sans-serif", color: COLORS.HUD_CSS };
+    const textStyle = { fontFamily: "sans-serif", color: COLORS.HUD_CSS, resolution: TEXT_RESOLUTION };
 
     this.add
       .text(w / 2, h / 2 - 72, "ハネダン！", {
@@ -129,6 +131,7 @@ export class TitleScene extends Phaser.Scene {
         fontFamily: "sans-serif",
         fontSize: "13px",
         color: COLORS.RECORD_CSS,
+        resolution: TEXT_RESOLUTION,
       })
       .setOrigin(0.5);
     this.refreshDifficultyUi();

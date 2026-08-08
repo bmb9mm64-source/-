@@ -76,3 +76,62 @@ export function missileVertices(shape: MissileShape): [number, number][] {
   }
   return pts;
 }
+
+// --- 敵C「スナイパー」弾：細長い徹甲弾＋後方の曳光（GDD §5 v0.20） ---
+
+/** スナイパー弾の形状（ローカル座標・進行方向は +X） */
+export interface SniperShape {
+  bodyRect: Rect; // 弾体の胴（後端〜円錐の付け根）
+  tipTri: Triangle; // 弾体の先端（円錐部。先端は +radius＝当たり判定の縁）
+  trailTri: Triangle; // 曳光（後方へ細く伸びる）
+}
+
+/** スナイパー弾の形状を組み立てる */
+export function sniperShape(radius: number): SniperShape {
+  const f = BALANCE.FX;
+  const r = radius;
+  const hw = f.SNIPER_HALF_WIDTH * r;
+  const nose = f.MISSILE_NOSE * r; // 先端＝当たり判定の縁
+  const back = nose - f.SNIPER_LEN * r; // 弾体の後端
+  const shoulder = nose - f.SNIPER_LEN * 0.25 * r; // 円錐の付け根
+  return {
+    bodyRect: { x: back, y: -hw, w: shoulder - back, h: hw * 2 },
+    tipTri: [shoulder, -hw, shoulder, hw, nose, 0],
+    trailTri: [back, -hw, back, hw, -f.SNIPER_TRAIL * r, 0],
+  };
+}
+
+// --- 敵G「プリズム」弾：自転する結晶＋残り反射回数の輪（GDD §5 v0.20） ---
+
+/** プリズム弾の形状（ローカル座標。進行方向は持たず自転する） */
+export interface PrismShape {
+  /** 結晶（6角形）の頂点 [x, y] の並び。外接半径は当たり判定半径と同じ */
+  crystal: [number, number][];
+  /** 中心から引く稜線の終点 */
+  edges: [number, number][];
+  /** 残り反射回数を示す輪の半径（外側ほど残りが多い）。当たり判定の外側に薄く描く */
+  ringRadii: number[];
+}
+
+/**
+ * プリズム弾の形状を組み立てる。
+ * @param radius 当たり判定半径 [px]
+ * @param spin 自転角 [rad]
+ * @param bouncesLeft 残り反射回数（輪の本数になる）
+ */
+export function prismShape(radius: number, spin: number, bouncesLeft: number): PrismShape {
+  const f = BALANCE.FX;
+  const outer = f.PRISM_RADIUS * radius; // 実体は当たり判定と同じ大きさ
+  const crystal: [number, number][] = [];
+  const edges: [number, number][] = [];
+  for (let i = 0; i < 6; i++) {
+    const a = spin + (i * Math.PI) / 3;
+    crystal.push([Math.cos(a) * outer, Math.sin(a) * outer]);
+    if (i % 2 === 0) edges.push([Math.cos(a) * outer, Math.sin(a) * outer]);
+  }
+  const ringRadii: number[] = [];
+  for (let i = 0; i < Math.max(0, bouncesLeft); i++) {
+    ringRadii.push(outer + (i + 1) * f.PRISM_RING_GAP * radius);
+  }
+  return { crystal, edges, ringRadii };
+}

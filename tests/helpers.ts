@@ -20,6 +20,7 @@ export function makeBullet(partial: Partial<Bullet>): Bullet {
     bounces: 0,
     owner: { x: 0, y: 0 }, // 実体の戦車ではないダミーの発射者
     ownerIsPlayer: false,
+    style: "normal",
     armed: true,
     dead: false,
     ...partial,
