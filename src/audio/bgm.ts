@@ -2,8 +2,8 @@
  * BGM（GDD §9 v0.11／v0.20）— Web Audio API による自作合成のループ。
  * 外部音源ファイルは使わない（知財ポリシー）。原作の旋律も使わず、進行・旋律とも完全オリジナル。
  *
- * 構成（v0.20 で層を厚くした）：
- *   リード（旋律。鋸波2基をわずかにずらして厚みを出し、ディレイ＝山びこを掛ける）
+ * 構成（v0.20 で層を厚くし、v0.20.1 で明るいポップへ作り替えた）：
+ *   リード（旋律。矩形波2基をわずかにずらして厚みを出し、浅いディレイ＝山びこを掛ける）
  *   ＋ パッド（和音の敷物。ふわっと鳴らして隙間を埋める）
  *   ＋ ベース（ローパスで丸めた低音）
  *   ＋ ドラム（キック・スネア・ハイハット。緊張感のある曲のみ）
@@ -11,6 +11,8 @@
  * 単調さの原因は「8音のパターンが延々と繰り返される」ことだったので、
  *   ① コード進行を持たせて和音が移り変わるようにし、
  *   ② 8小節ループの前半4小節（A）と後半4小節（B）で旋律を変える。
+ * さらに「不気味に聞こえる」という指摘を受け、キーを C メジャーに、波形を矩形波に、
+ * ディレイを浅くして明るいポップに寄せた（v0.20.1）。
  *
  * 先読みスケジューリング：setInterval で定期的に起き、少し先（SCHEDULE_AHEAD 秒）までの音を
  * AudioContext の正確な時刻に予約する。JS のタイマー精度に依存せずリズムが揺れない定石の実装。
@@ -170,29 +172,29 @@ class BgmEngine {
   ): void {
     const inBar = step % B.STEPS_PER_BAR;
     const bar = Math.floor(step / B.STEPS_PER_BAR) % B.BARS_PER_LOOP;
-    const chordRoot = cfg.PROG[bar % cfg.PROG.length]!;
+    const chord = cfg.PROG[bar % cfg.PROG.length]!;
     // 8小節ループの前半＝A、後半＝B。同じ進行でも旋律が変わるので繰り返し感が薄れる
     const lead = bar < B.BARS_PER_LOOP / 2 ? cfg.LEAD_A : cfg.LEAD_B;
 
-    // --- リード（旋律）。コードの根音に乗せて動く ---
+    // --- リード（旋律）。C メジャーの絶対音程なので、どのコードの上でも自然に響く ---
     const note = lead[inBar % lead.length]!;
-    if (note !== REST) this.lead(ctx, semitone(chordRoot + note), at);
+    if (note !== REST) this.lead(ctx, semitone(note), at);
 
-    // --- パッド（和音の敷物）。小節頭に和音をふわっと置く ---
+    // --- パッド（和音の敷物）。小節頭にそのコードをふわっと置く ---
     if (inBar === 0) {
       const barDur = stepDur * B.STEPS_PER_BAR;
-      for (const iv of cfg.CHORD) this.pad(ctx, semitone(chordRoot + iv), at, barDur);
+      for (const iv of chord.TONES) this.pad(ctx, semitone(chord.ROOT + iv), at, barDur);
     }
 
-    // --- ベース ---
+    // --- ベース（コードの根音から2オクターブ下） ---
     const bassNote = cfg.BASS[inBar % cfg.BASS.length]!;
-    if (bassNote !== REST) this.bass(ctx, semitone(chordRoot + bassNote - 24), at);
+    if (bassNote !== REST) this.bass(ctx, semitone(chord.ROOT + bassNote - 24), at);
 
-    // --- ドラム（緊張感のある曲のみ） ---
+    // --- ドラム（跳ねる曲のみ）。裏拍のハイハットで前へ進む感じを出す ---
     if (cfg.DRUMS) {
       if (inBar === 0 || inBar === 4) this.kick(ctx, at);
       if (inBar === 2 || inBar === 6) this.snare(ctx, at);
-      if (inBar % 2 === 1) this.hat(ctx, at);
+      this.hat(ctx, at); // 8分でずっと刻む（ポップな推進力）
     }
   }
 
@@ -209,7 +211,7 @@ class BgmEngine {
     filter.connect(g).connect(this.leadBus);
     for (const detune of [-B.LEAD_DETUNE, B.LEAD_DETUNE]) {
       const o = ctx.createOscillator();
-      o.type = "sawtooth";
+      o.type = B.LEAD_WAVE;
       o.frequency.value = freq;
       o.detune.value = detune;
       o.connect(filter);
