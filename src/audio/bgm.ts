@@ -211,9 +211,12 @@ class BgmEngine {
       for (const iv of chord.TONES) this.pad(ctx, semitone(chord.ROOT + iv), t, barDur);
     }
 
-    // --- ベース（コードの根音から2オクターブ下） ---
-    const bassNote = cfg.BASS[inBar % cfg.BASS.length]!;
-    if (bassNote !== REST) this.bass(ctx, semitone(chord.ROOT + bassNote - 24), t);
+    // --- ベース（2オクターブ下）。数値はそのコードの構成音の番号なので、
+    //     根音→第3音→第5音→第7音と並べればウォーキングベースになる（v0.22） ---
+    const bassTone = cfg.BASS[inBar % cfg.BASS.length]!;
+    if (bassTone !== REST) {
+      this.bass(ctx, semitone(chord.ROOT + chord.TONES[bassTone % chord.TONES.length]! - 24), t);
+    }
 
     // --- ドラム（DRUMS を持つ曲のみ）。派手なフィルは入れず一定のグルーヴを保つ ---
     const drums: DrumPattern | null = cfg.DRUMS;
