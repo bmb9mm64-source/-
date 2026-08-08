@@ -1,25 +1,26 @@
 /**
- * BGM（GDD §9 v0.11／v0.20）— Web Audio API による自作合成のループ。
+ * BGM（GDD §9 v0.11／v0.20／v0.21）— Web Audio API による自作合成のループ。
  * 外部音源ファイルは使わない（知財ポリシー）。原作の旋律も使わず、進行・旋律とも完全オリジナル。
  *
- * 構成（v0.20 で層を厚くし、v0.20.1 で明るいポップへ作り替えた）：
- *   リード（旋律。矩形波2基をわずかにずらして厚みを出し、浅いディレイ＝山びこを掛ける）
- *   ＋ パッド（和音の敷物。ふわっと鳴らして隙間を埋める）
- *   ＋ ベース（ローパスで丸めた低音）
- *   ＋ ドラム（キック・スネア・ハイハット。緊張感のある曲のみ）
+ * 構成：
+ *   リード（旋律。三角波2基＋控えめな矩形波で芯を足し、浅いディレイ＝山びこを掛ける）
+ *   ＋ アルペジオ（旋律が休んでいる間だけ和音を分散して鳴らす＝コール＆レスポンス）
+ *   ＋ パッド（和音の敷物）＋ ベース ＋ ドラム（テンポの速い曲のみ）
  *
- * 単調さの原因は「8音のパターンが延々と繰り返される」ことだったので、
- *   ① コード進行を持たせて和音が移り変わるようにし、
- *   ② 8小節ループの前半4小節（A）と後半4小節（B）で旋律を変える。
- * さらに「不気味に聞こえる」という指摘を受け、キーを C メジャーに、波形を矩形波に、
- * ディレイを浅くして明るいポップに寄せた（v0.20.1）。
+ * v0.21「長く聴いていられる曲」への作り替え（GDD §9）。以前は 1小節（8音）の
+ * パターンを延々と繰り返していたため数十秒で耳に付いた。直したのは次の6点：
+ *   ① 旋律を4小節（32音）の**フレーズ**単位で持ち、A→B→A→C の16小節形式で並べる
+ *   ② HOLD（-98）で音を伸ばし、音の長さを揃えない（緩急＝歌っている感じ）
+ *   ③ 拍頭を強く・それ以外を弱くする（一定音量は聴き疲れの原因）
+ *   ④ リードの主波形を三角波にする（矩形波は高次倍音が多く長時間で耳に刺さる）
+ *   ⑤ 旋律の休符中だけアルペジオで隙間を埋める
+ *   ⑥ スウィングで裏拍を少し後ろへずらし、機械的な等間隔を崩す
  *
  * 先読みスケジューリング：setInterval で定期的に起き、少し先（SCHEDULE_AHEAD 秒）までの音を
  * AudioContext の正確な時刻に予約する。JS のタイマー精度に依存せずリズムが揺れない定石の実装。
  *
  * AudioContext は SFX と共有する（ブラウザの自動再生制限に従い、ユーザー操作後の SFX.unlock() が前提）。
- */
-import { BALANCE } from "../config/balance";
+ */import { BALANCE } from "../config/balance";
 import { SFX } from "./sfx";
 
 /** 曲名（シーンに対応） */
@@ -29,6 +30,8 @@ const B = BALANCE.BGM;
 
 /** 休符を表す音程値（半音数として使えない値にしてある） */
 const REST = -99;
+/** 直前の音を伸ばすことを表す値（音符の長さを揃えないための記号） */
+const HOLD = -98;
 
 /** 半音数 → 周波数 [Hz] */
 function semitone(n: number): number {
@@ -173,51 +176,95 @@ class BgmEngine {
     const inBar = step % B.STEPS_PER_BAR;
     const bar = Math.floor(step / B.STEPS_PER_BAR) % B.BARS_PER_LOOP;
     const chord = cfg.PROG[bar % cfg.PROG.length]!;
-    // 8小節ループの前半＝A、後半＝B。同じ進行でも旋律が変わるので繰り返し感が薄れる
-    const lead = bar < B.BARS_PER_LOOP / 2 ? cfg.LEAD_A : cfg.LEAD_B;
+    // スウィング：裏拍（奇数の8分）を少し後ろへずらし、機械的な等間隔を崩す
+    const t = at + (inBar % 2 === 1 ? cfg.SWING * stepDur : 0);
 
-    // --- リード（旋律）。C メジャーの絶対音程なので、どのコードの上でも自然に響く ---
-    const note = lead[inBar % lead.length]!;
-    if (note !== REST) this.lead(ctx, semitone(note), at);
+    // --- リード（旋律）：4小節のフレーズを FORM の順（A→B→A→C）に並べる ---
+    const stepsPerPhrase = B.STEPS_PER_BAR * B.BARS_PER_PHRASE;
+    const form = cfg.FORM[Math.floor(bar / B.BARS_PER_PHRASE) % cfg.FORM.length]!;
+    const phrase = cfg.PHRASES[form]!;
+    const inPhrase = step % stepsPerPhrase;
+    const note = phrase[inPhrase]!;
+    if (note !== REST && note !== HOLD) {
+      // 後ろに続く HOLD の数だけ音を伸ばす＝音符の長さが揃わず「歌っている」感じになる
+      let len = 1;
+      while (len < stepsPerPhrase && phrase[(inPhrase + len) % stepsPerPhrase] === HOLD) len++;
+      const dur = Math.min(len * stepDur * B.LEAD_GATE, B.LEAD_MAX_DUR);
+      // 拍頭は強く、それ以外は弱く（同じ音量が続くと耳が疲れる）
+      const vol = B.LEAD_VOL * (inBar % 4 === 0 ? 1 : B.LEAD_SOFT);
+      this.lead(ctx, semitone(note), t, dur, vol);
+    } else if (note === REST && cfg.ARP) {
+      // 旋律が休んでいるときだけ和音を分散して鳴らす（コール＆レスポンス。隙間を埋めつつ濁らせない）
+      const iv = chord.TONES[step % chord.TONES.length]!;
+      this.arp(ctx, semitone(chord.ROOT + iv + 12), t);
+    }
 
     // --- パッド（和音の敷物）。小節頭にそのコードをふわっと置く ---
     if (inBar === 0) {
       const barDur = stepDur * B.STEPS_PER_BAR;
-      for (const iv of chord.TONES) this.pad(ctx, semitone(chord.ROOT + iv), at, barDur);
+      for (const iv of chord.TONES) this.pad(ctx, semitone(chord.ROOT + iv), t, barDur);
     }
 
     // --- ベース（コードの根音から2オクターブ下） ---
     const bassNote = cfg.BASS[inBar % cfg.BASS.length]!;
-    if (bassNote !== REST) this.bass(ctx, semitone(chord.ROOT + bassNote - 24), at);
+    if (bassNote !== REST) this.bass(ctx, semitone(chord.ROOT + bassNote - 24), t);
 
-    // --- ドラム（跳ねる曲のみ）。裏拍のハイハットで前へ進む感じを出す ---
+    // --- ドラム（テンポの速い曲のみ）。派手なフィルは入れず一定のグルーヴを保つ ---
     if (cfg.DRUMS) {
-      if (inBar === 0 || inBar === 4) this.kick(ctx, at);
-      if (inBar === 2 || inBar === 6) this.snare(ctx, at);
-      this.hat(ctx, at); // 8分でずっと刻む（ポップな推進力）
+      if (inBar === 0 || inBar === 4) this.kick(ctx, t);
+      if (inBar === 2 || inBar === 6) this.snare(ctx, t);
+      this.hat(ctx, t, inBar % 2 === 0 ? 1 : B.HAT_SOFT); // 裏拍は弱く＝カチカチ耳に付かない
     }
   }
 
-  /** リード：鋸波2基をわずかにずらして厚みを出し、ローパスを閉じながら減衰させる */
-  private lead(ctx: AudioContext, freq: number, at: number): void {
+  /**
+   * リード：三角波2基をわずかにずらして厚みを出し、矩形波を小さく重ねて芯を足す。
+   * 三角波を主にしているのは、矩形波は高次倍音が多く長時間の再生で耳に刺さるため（GDD §9 v0.21）。
+   */
+  private lead(ctx: AudioContext, freq: number, at: number, dur: number, vol: number): void {
     if (!this.leadBus) return;
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.frequency.setValueAtTime(B.LEAD_CUT0, at);
-    filter.frequency.exponentialRampToValueAtTime(B.LEAD_CUT1, at + B.LEAD_DUR);
+    filter.frequency.exponentialRampToValueAtTime(B.LEAD_CUT1, at + dur);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(B.LEAD_VOL, at);
-    g.gain.exponentialRampToValueAtTime(0.001, at + B.LEAD_DUR);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at + B.LEAD_ATTACK); // 立ち上がりを付けてプチッと鳴らさない
+    g.gain.exponentialRampToValueAtTime(0.001, at + dur);
     filter.connect(g).connect(this.leadBus);
-    for (const detune of [-B.LEAD_DETUNE, B.LEAD_DETUNE]) {
+    const voices: [OscillatorType, number, number][] = [
+      [B.LEAD_WAVE, -B.LEAD_DETUNE, 1],
+      [B.LEAD_WAVE, B.LEAD_DETUNE, 1],
+      [B.LEAD_EDGE_WAVE, 0, B.LEAD_EDGE_MIX],
+    ];
+    for (const [type, detune, mix] of voices) {
       const o = ctx.createOscillator();
-      o.type = B.LEAD_WAVE;
+      o.type = type;
       o.frequency.value = freq;
       o.detune.value = detune;
-      o.connect(filter);
+      const vg = ctx.createGain();
+      vg.gain.value = mix;
+      o.connect(vg).connect(filter);
       o.start(at);
-      o.stop(at + B.LEAD_DUR);
+      o.stop(at + dur);
     }
+  }
+
+  /** アルペジオ：旋律の休符を埋める小さく柔らかい単音（リードと同じディレイに送る） */
+  private arp(ctx: AudioContext, freq: number, at: number): void {
+    if (!this.leadBus) return;
+    const o = ctx.createOscillator();
+    o.type = "triangle";
+    o.frequency.value = freq;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = B.ARP_CUT;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(B.ARP_VOL, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + B.ARP_DUR);
+    o.connect(filter).connect(g).connect(this.leadBus);
+    o.start(at);
+    o.stop(at + B.ARP_DUR);
   }
 
   /** パッド：小節いっぱい伸びる柔らかい和音（ふわっと入ってふわっと消える） */
@@ -272,9 +319,9 @@ class BgmEngine {
     this.noiseBurst(ctx, at, B.SNARE_DUR, B.SNARE_VOL, "bandpass", B.SNARE_BAND);
   }
 
-  /** ハイハット：ノイズをハイパスで抜いた極短音 */
-  private hat(ctx: AudioContext, at: number): void {
-    this.noiseBurst(ctx, at, B.HAT_DUR, B.HAT_VOL, "highpass", B.HAT_HIGHPASS);
+  /** ハイハット：ノイズをハイパスで抜いた極短音（accent＝1で通常、小さいほど弱く） */
+  private hat(ctx: AudioContext, at: number, accent: number): void {
+    this.noiseBurst(ctx, at, B.HAT_DUR, B.HAT_VOL * accent, "highpass", B.HAT_HIGHPASS);
   }
 
   /** ノイズを1発鳴らす（スネア・ハイハット共通。バッファは使い回す） */
