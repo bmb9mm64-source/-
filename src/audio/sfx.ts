@@ -13,7 +13,25 @@ import type { WorldEvent } from "../core/world";
  * balance.ts ではなく本ファイルに名前付きで集約する（マジックナンバー禁止の趣旨は維持）。
  */
 const P = {
-  FIRE: { TYPE: "square" as OscillatorType, F0: 480, F1: 140, DUR: 0.12 },
+  // 射撃（v0.20）：単発の矩形波スイープだけだと「ピュン」と安っぽいので3層で作る。
+  //   ① 低音のボディ … 発射の重さ（腹に来る成分）
+  //   ② ノイズのアタック … 火薬の破裂感。ローパスを閉じて「バッ」と短く
+  //   ③ 高音のクリック … 立ち上がりの鋭さ（無いと鈍く聞こえる）
+  FIRE: {
+    BODY_TYPE: "triangle" as OscillatorType,
+    BODY_F0: 320,
+    BODY_F1: 70,
+    BODY_DUR: 0.18,
+    NOISE_DUR: 0.09,
+    NOISE_CUT0: 3800,
+    NOISE_CUT1: 400,
+    NOISE_VOL: 0.9, // FIRE 音量に対する比
+    CLICK_TYPE: "square" as OscillatorType,
+    CLICK_F0: 1500,
+    CLICK_F1: 600,
+    CLICK_DUR: 0.035,
+    CLICK_VOL: 0.35,
+  },
   BOUNCE: { TYPE: "triangle" as OscillatorType, F0: 900, F1: 500, DUR: 0.06 },
   CANCEL: { TYPE: "square" as OscillatorType, F0: 1200, F1: 200, DUR: 0.09 },
   DESTROY: { NOISE_DUR: 0.35, CUT0: 1200, CUT1: 100, RUMBLE_F0: 110, RUMBLE_F1: 40, RUMBLE_DUR: 0.3 },
@@ -101,9 +119,13 @@ class SfxEngine {
     src.start(t0);
   }
 
-  /** 射撃 */
+  /** 射撃（低音ボディ＋ノイズのアタック＋高音クリックの3層。GDD §9 v0.20） */
   fire(): void {
-    this.tone(P.FIRE.TYPE, P.FIRE.F0, P.FIRE.F1, P.FIRE.DUR, BALANCE.AUDIO.FIRE);
+    const c = P.FIRE;
+    const v = BALANCE.AUDIO.FIRE;
+    this.tone(c.BODY_TYPE, c.BODY_F0, c.BODY_F1, c.BODY_DUR, v);
+    this.noise(c.NOISE_DUR, v * c.NOISE_VOL, c.NOISE_CUT0, c.NOISE_CUT1);
+    this.tone(c.CLICK_TYPE, c.CLICK_F0, c.CLICK_F1, c.CLICK_DUR, v * c.CLICK_VOL);
   }
 
   /** 跳弾反射 */

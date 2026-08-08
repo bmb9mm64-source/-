@@ -1,9 +1,16 @@
 /**
- * BGM（GDD §9 v0.11）— Web Audio API による自作合成のループ。外部音源ファイルは使わない（知財ポリシー）。
+ * BGM（GDD §9 v0.11／v0.20）— Web Audio API による自作合成のループ。
+ * 外部音源ファイルは使わない（知財ポリシー）。原作の旋律も使わず、進行・旋律とも完全オリジナル。
  *
- * 構成は3層：
- *   ベース（低音の持続音） ＋ アルペジオ（分散和音のメロディ） ＋ ハイハット（短いノイズ）。
- * 音階はマイナー・ペンタトニック（暗く緊張感のある5音階）。シーンごとにテンポと音型を変える。
+ * 構成（v0.20 で層を厚くした）：
+ *   リード（旋律。鋸波2基をわずかにずらして厚みを出し、ディレイ＝山びこを掛ける）
+ *   ＋ パッド（和音の敷物。ふわっと鳴らして隙間を埋める）
+ *   ＋ ベース（ローパスで丸めた低音）
+ *   ＋ ドラム（キック・スネア・ハイハット。緊張感のある曲のみ）
+ *
+ * 単調さの原因は「8音のパターンが延々と繰り返される」ことだったので、
+ *   ① コード進行を持たせて和音が移り変わるようにし、
+ *   ② 8小節ループの前半4小節（A）と後半4小節（B）で旋律を変える。
  *
  * 先読みスケジューリング：setInterval で定期的に起き、少し先（SCHEDULE_AHEAD 秒）までの音を
  * AudioContext の正確な時刻に予約する。JS のタイマー精度に依存せずリズムが揺れない定石の実装。
@@ -18,8 +25,17 @@ export type BgmTrack = keyof typeof BALANCE.BGM.TRACKS;
 
 const B = BALANCE.BGM;
 
+/** 休符を表す音程値（半音数として使えない値にしてある） */
+const REST = -99;
+
+/** 半音数 → 周波数 [Hz] */
+function semitone(n: number): number {
+  return B.ROOT_HZ * 2 ** (n / 12);
+}
+
 class BgmEngine {
-  private gain: GainNode | null = null;
+  private gain: GainNode | null = null; // 全体の出口
+  private leadBus: GainNode | null = null; // リード（ディレイ送り）
   private noiseBuf: AudioBuffer | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private track: BgmTrack | null = null;
@@ -57,9 +73,27 @@ class BgmEngine {
     const ctx = SFX.audioContext();
     if (!ctx) return; // 未初期化（＝まだユーザー操作がない）。unlock 後の呼び出しで鳴り始める
     this.track = track;
+
+    const cfg = B.TRACKS[track];
+    const stepDur = 60 / cfg.TEMPO / 2; // 8分音符の長さ [s]
+
     this.gain = ctx.createGain();
     this.gain.gain.value = BALANCE.AUDIO.BGM_MASTER;
     this.gain.connect(ctx.destination);
+
+    // リード用のディレイ（山びこ）。旋律だけに掛けて空間を出す
+    this.leadBus = ctx.createGain();
+    this.leadBus.connect(this.gain);
+    const delay = ctx.createDelay(1.0);
+    delay.delayTime.value = stepDur * B.DELAY_STEPS;
+    const fb = ctx.createGain();
+    fb.gain.value = B.DELAY_FEEDBACK;
+    const wet = ctx.createGain();
+    wet.gain.value = B.DELAY_MIX;
+    this.leadBus.connect(delay);
+    delay.connect(fb).connect(delay); // フィードバックで減衰しながら繰り返す
+    delay.connect(wet).connect(this.gain);
+
     this.step = 0;
     this.nextTime = ctx.currentTime + 0.08; // わずかな余裕をもって開始
     this.timer = setInterval(() => this.schedule(ctx), B.TICK_MS);
@@ -71,6 +105,10 @@ class BgmEngine {
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.leadBus) {
+      this.leadBus.disconnect();
+      this.leadBus = null;
     }
     if (this.gain) {
       this.gain.disconnect();
@@ -114,81 +152,158 @@ class BgmEngine {
   private schedule(ctx: AudioContext): void {
     if (!this.track || !this.gain) return;
     const cfg = B.TRACKS[this.track];
-    const stepDur = 60 / cfg.TEMPO / 2; // 8分音符の長さ [s]
+    const stepDur = 60 / cfg.TEMPO / 2;
     while (this.nextTime < ctx.currentTime + B.SCHEDULE_AHEAD) {
-      this.emit(ctx, cfg, this.step, this.nextTime);
+      this.emit(ctx, cfg, this.step, this.nextTime, stepDur);
       this.step++;
       this.nextTime += stepDur;
     }
   }
 
-  /** 1ステップ分の発音を予約する */
+  /** 1ステップぶんの音を予約する */
   private emit(
     ctx: AudioContext,
     cfg: (typeof B.TRACKS)[BgmTrack],
     step: number,
     at: number,
+    stepDur: number,
   ): void {
     const inBar = step % B.STEPS_PER_BAR;
-    const bar = Math.floor(step / B.STEPS_PER_BAR) % cfg.BASS.length;
+    const bar = Math.floor(step / B.STEPS_PER_BAR) % B.BARS_PER_LOOP;
+    const chordRoot = cfg.PROG[bar % cfg.PROG.length]!;
+    // 8小節ループの前半＝A、後半＝B。同じ進行でも旋律が変わるので繰り返し感が薄れる
+    const lead = bar < B.BARS_PER_LOOP / 2 ? cfg.LEAD_A : cfg.LEAD_B;
 
-    // --- アルペジオ（-1 は休符） ---
-    const degree = cfg.PATTERN[inBar % cfg.PATTERN.length]!;
-    if (degree >= 0) {
-      const freq = B.SCALE[degree % B.SCALE.length]!;
-      this.tone("triangle", freq, at, B.NOTE_DUR, B.ARP_VOL);
+    // --- リード（旋律）。コードの根音に乗せて動く ---
+    const note = lead[inBar % lead.length]!;
+    if (note !== REST) this.lead(ctx, semitone(chordRoot + note), at);
+
+    // --- パッド（和音の敷物）。小節頭に和音をふわっと置く ---
+    if (inBar === 0) {
+      const barDur = stepDur * B.STEPS_PER_BAR;
+      for (const iv of cfg.CHORD) this.pad(ctx, semitone(chordRoot + iv), at, barDur);
     }
 
-    // --- ベース（小節頭と中間で鳴らす） ---
-    if (inBar === 0 || inBar === B.STEPS_PER_BAR / 2) {
-      const root = B.SCALE[cfg.BASS[bar]! % B.SCALE.length]! * B.BASS_OCTAVE;
-      this.tone("sine", root, at, B.BASS_DUR, B.BASS_VOL);
+    // --- ベース ---
+    const bassNote = cfg.BASS[inBar % cfg.BASS.length]!;
+    if (bassNote !== REST) this.bass(ctx, semitone(chordRoot + bassNote - 24), at);
+
+    // --- ドラム（緊張感のある曲のみ） ---
+    if (cfg.DRUMS) {
+      if (inBar === 0 || inBar === 4) this.kick(ctx, at);
+      if (inBar === 2 || inBar === 6) this.snare(ctx, at);
+      if (inBar % 2 === 1) this.hat(ctx, at);
     }
-
-    // --- ハイハット（裏拍。緊張感のある曲のみ） ---
-    if (cfg.HAT && inBar % 2 === 1) this.hat(ctx, at);
   }
 
-  /** 単音（減衰するトーン）を予約する */
-  private tone(type: OscillatorType, freq: number, at: number, dur: number, vol: number): void {
-    const ctx = SFX.audioContext();
-    if (!ctx || !this.gain) return;
-    const osc = ctx.createOscillator();
-    const env = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, at);
-    // 立ち上がりを少しなだらかにして耳障りなクリック音を防ぐ
-    env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(vol, at + 0.012);
-    env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-    osc.connect(env).connect(this.gain);
-    osc.start(at);
-    osc.stop(at + dur + 0.02);
+  /** リード：鋸波2基をわずかにずらして厚みを出し、ローパスを閉じながら減衰させる */
+  private lead(ctx: AudioContext, freq: number, at: number): void {
+    if (!this.leadBus) return;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(B.LEAD_CUT0, at);
+    filter.frequency.exponentialRampToValueAtTime(B.LEAD_CUT1, at + B.LEAD_DUR);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(B.LEAD_VOL, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + B.LEAD_DUR);
+    filter.connect(g).connect(this.leadBus);
+    for (const detune of [-B.LEAD_DETUNE, B.LEAD_DETUNE]) {
+      const o = ctx.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.value = freq;
+      o.detune.value = detune;
+      o.connect(filter);
+      o.start(at);
+      o.stop(at + B.LEAD_DUR);
+    }
   }
 
-  /** ハイハット（短いノイズ）を予約する */
+  /** パッド：小節いっぱい伸びる柔らかい和音（ふわっと入ってふわっと消える） */
+  private pad(ctx: AudioContext, freq: number, at: number, dur: number): void {
+    if (!this.gain) return;
+    const o = ctx.createOscillator();
+    o.type = "triangle";
+    o.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(B.PAD_VOL, at + B.PAD_ATTACK);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g).connect(this.gain);
+    o.start(at);
+    o.stop(at + dur);
+  }
+
+  /** ベース：ローパスで丸めた低音 */
+  private bass(ctx: AudioContext, freq: number, at: number): void {
+    if (!this.gain) return;
+    const o = ctx.createOscillator();
+    o.type = "sawtooth";
+    o.frequency.value = freq;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = B.BASS_CUT;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(B.BASS_VOL, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + B.BASS_DUR);
+    o.connect(filter).connect(g).connect(this.gain);
+    o.start(at);
+    o.stop(at + B.BASS_DUR);
+  }
+
+  /** キック：サイン波を急激に下げて「ドッ」と鳴らす */
+  private kick(ctx: AudioContext, at: number): void {
+    if (!this.gain) return;
+    const o = ctx.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(B.KICK_F0, at);
+    o.frequency.exponentialRampToValueAtTime(B.KICK_F1, at + B.KICK_DUR);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(B.KICK_VOL, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + B.KICK_DUR);
+    o.connect(g).connect(this.gain);
+    o.start(at);
+    o.stop(at + B.KICK_DUR);
+  }
+
+  /** スネア：ノイズをバンドパスで抜いた短い破裂音 */
+  private snare(ctx: AudioContext, at: number): void {
+    this.noiseBurst(ctx, at, B.SNARE_DUR, B.SNARE_VOL, "bandpass", B.SNARE_BAND);
+  }
+
+  /** ハイハット：ノイズをハイパスで抜いた極短音 */
   private hat(ctx: AudioContext, at: number): void {
+    this.noiseBurst(ctx, at, B.HAT_DUR, B.HAT_VOL, "highpass", B.HAT_HIGHPASS);
+  }
+
+  /** ノイズを1発鳴らす（スネア・ハイハット共通。バッファは使い回す） */
+  private noiseBurst(
+    ctx: AudioContext,
+    at: number,
+    dur: number,
+    vol: number,
+    filterType: BiquadFilterType,
+    freq: number,
+  ): void {
     if (!this.gain) return;
     if (!this.noiseBuf) {
-      // ホワイトノイズのバッファを1度だけ作って使い回す
-      const len = Math.ceil(ctx.sampleRate * 0.2);
-      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-      this.noiseBuf = buf;
+      const len = Math.ceil(ctx.sampleRate * 0.3);
+      this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuf;
-    const hp = ctx.createBiquadFilter();
-    hp.type = "highpass"; // 低音を削って「チッ」という音にする
-    hp.frequency.value = 7000;
-    const env = ctx.createGain();
-    env.gain.setValueAtTime(B.HAT_VOL, at);
-    env.gain.exponentialRampToValueAtTime(0.0001, at + B.HAT_DUR);
-    src.connect(hp).connect(env).connect(this.gain);
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, at);
+    g.gain.exponentialRampToValueAtTime(0.001, at + dur);
+    src.connect(filter).connect(g).connect(this.gain);
     src.start(at);
-    src.stop(at + B.HAT_DUR + 0.01);
+    src.stop(at + dur);
   }
 }
 
+/** BGM のシングルトン（シーンから共用する） */
 export const BGM = new BgmEngine();

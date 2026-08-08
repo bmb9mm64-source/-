@@ -4,6 +4,13 @@
 import { BALANCE } from "../config/balance";
 import { type ParsedStage, reflectsBullet, stopsBullet, tileAt } from "./stage";
 
+/**
+ * 弾の見た目の種別（GDD §5「弾の見た目」v0.20）。
+ * 描画側が挙動（fuse の有無・maxBounces の値）から推測すると、
+ * 数値を変えただけで見た目が変わってしまう。何に見せたいかは明示して持たせる。
+ */
+export type BulletStyle = "normal" | "sniper" | "prism" | "shell";
+
 /** 弾 */
 export interface Bullet {
   x: number;
@@ -15,6 +22,7 @@ export interface Bullet {
   maxBounces?: number; // この弾固有の反射上限（未設定＝BALANCE.BULLET.MAX_BOUNCES。敵E弾は2。GDD §6 v0.9）
   owner: BulletOwner; // 発射者（同時発射数のカウントと、発射直後の自弾判定に使う）
   ownerIsPlayer: boolean; // 発射者がプレイヤー側か（v0.12：敵弾は敵に当たらない。GDD §5.2）
+  style: BulletStyle; // 見た目の種別（描画専用。当たり判定には一切影響しない）
   armed: boolean; // 発射者から一度離れたか（GDD §5.3 v0.12：離れるまで発射者には当たらない）
   fuse?: number; // 榴弾の炸裂までの残り時間 [s]（敵M「ボマー」の弾のみ。GDD §6 v0.14）
   blastRadius?: number; // 炸裂時の爆風半径 [px]（fuse を持つ弾のみ）
@@ -43,6 +51,7 @@ export interface BulletSpawnConfig {
   SPEED: number;
   RADIUS: number;
   MUZZLE_OFFSET: number;
+  STYLE?: BulletStyle; // 見た目の種別（省略時は "normal"）
   MAX_BOUNCES?: number; // 弾固有の反射上限（省略時は共通の BALANCE.BULLET.MAX_BOUNCES）
   FUSE?: number; // 榴弾：炸裂までの時間 [s]（設定すると反射せず、時間切れ／壁接触で炸裂する）
   BLAST_RADIUS?: number; // 榴弾：炸裂時の爆風半径 [px]
@@ -92,6 +101,7 @@ export function spawnBullet(
     bounces: 0,
     owner,
     ownerIsPlayer: owner.kind === "player", // GDD §5.2：敵弾は敵に当たらない
+    style: cfg.STYLE ?? "normal",
     // 砲口が壁補正で発射者の内側に寄った場合に備え、発射者から離れるまでは発射者に当てない
     armed: false,
     dead: false,
@@ -114,6 +124,7 @@ export const ENEMY_BULLET_CFG: BulletSpawnConfig = {
 
 /** 敵C「スナイパー」弾の生成設定（GDD §6 v0.6：340px/s。反射上限は共通の1回） */
 export const SNIPER_BULLET_CFG: BulletSpawnConfig = {
+  STYLE: "sniper",
   SPEED: BALANCE.BULLET.SNIPER_BULLET_SPEED,
   RADIUS: BALANCE.BULLET.RADIUS,
   MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
@@ -129,6 +140,7 @@ export const REFLECTOR_BULLET_CFG: BulletSpawnConfig = {
 
 /** 敵G「プリズム」弾の生成設定（GDD §6 v0.10：280px/s・この弾だけ反射上限3回） */
 export const PRISM_BULLET_CFG: BulletSpawnConfig = {
+  STYLE: "prism",
   SPEED: BALANCE.BULLET.PRISM_BULLET_SPEED,
   RADIUS: BALANCE.BULLET.RADIUS,
   MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
@@ -144,6 +156,7 @@ export const VOLLEY_BULLET_CFG: BulletSpawnConfig = {
 
 /** 敵M「ボマー」の榴弾（GDD §6 v0.14：190px/s・反射せず 1.1 秒で炸裂） */
 export const SHELL_CFG: BulletSpawnConfig = {
+  STYLE: "shell",
   SPEED: BALANCE.BULLET.SHELL_SPEED,
   RADIUS: BALANCE.BULLET.RADIUS,
   MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,

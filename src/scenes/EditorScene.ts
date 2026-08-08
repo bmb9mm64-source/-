@@ -27,6 +27,7 @@ import {
 import type { EnemyChar } from "../core/enemyKinds";
 import { ENEMY_DEF_BY_CHAR } from "../core/enemyRegistry";
 import { safeLocalStorageStore } from "../core/records";
+import { applyRenderScale, TEXT_RESOLUTION } from "./renderScale";
 import { bindSceneAudio } from "./sceneAudio";
 
 /** 非敵タイルの表示ラベル（敵は記号から「敵A」…を機械的に作る） */
@@ -71,6 +72,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   create(): void {
+    applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
     this.input.setDefaultCursor("default");
@@ -101,7 +103,12 @@ export class EditorScene extends Phaser.Scene {
     this.input.on("pointermove", paint);
 
     // --- 上バー：タイルパレット（外周 row0 に重ねる） ---
-    const barStyle = { fontFamily: "sans-serif", fontSize: "13px", color: COLORS.HUD_CSS };
+    const barStyle = {
+      fontFamily: "sans-serif",
+      fontSize: "13px",
+      color: COLORS.HUD_CSS,
+      resolution: TEXT_RESOLUTION,
+    };
     const topBar = this.add.graphics().setDepth(5);
     topBar.fillStyle(0x11141c, 0.92);
     topBar.fillRect(0, 0, w, BALANCE.TILE);
