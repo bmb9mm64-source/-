@@ -36,6 +36,7 @@ import {
   type TouchResolved,
 } from "../core/touch";
 import { ALL_MISSIONS } from "../stages/allMissions";
+import { TUTORIAL_MISSIONS } from "../stages/tutorial";
 
 /** タイム表示用の等幅フォント（tabular＝桁幅が揃う描画にして桁ブレを防ぐ） */
 const MONO_FONT = '"Consolas", "Menlo", "Courier New", monospace';
@@ -151,6 +152,7 @@ export class GameScene extends Phaser.Scene {
   private readonly pauseHelpText = pauseHelp(); // ポーズ中の操作一覧（入力環境で内容が変わる）
   private hudAmmo1!: Phaser.GameObjects.Text; // 1P の残弾・残地雷（GDD §8 v0.17）
   private hudAmmo2!: Phaser.GameObjects.Text; // 2P の残弾・残地雷（2人プレイ時のみ）
+  private hudHint!: Phaser.GameObjects.Text; // チュートリアルの一言（本編では常に空。GDD §8.8）
 
   constructor() {
     super({ key: "GameScene" });
@@ -187,11 +189,13 @@ export class GameScene extends Phaser.Scene {
     //   キャンペーン … 従来どおりの並び
     const missions = this.customPlay
       ? [{ name: "カスタムステージ", grid: data.customStage! }]
-      : this.mode === "timeAttack"
-        ? [ALL_MISSIONS[this.timeAttackMission - 1]!]
-        : this.mode === "survival"
-          ? shuffleMissions(ALL_MISSIONS, Math.random)
-          : ALL_MISSIONS;
+      : this.mode === "tutorial"
+        ? TUTORIAL_MISSIONS
+        : this.mode === "timeAttack"
+          ? [ALL_MISSIONS[this.timeAttackMission - 1]!]
+          : this.mode === "survival"
+            ? shuffleMissions(ALL_MISSIONS, Math.random)
+            : ALL_MISSIONS;
     this.world = new GameWorld(
       missions,
       Math.random,
@@ -262,6 +266,18 @@ export class GameScene extends Phaser.Scene {
     this.hudAmmo2 = this.add
       .text(w - 10, h - 16, "", { ...ammoStyle, color: COLORS.P2_CSS })
       .setOrigin(1, 0.5)
+      .setDepth(5);
+    // チュートリアルの一言（GDD §8.8）。盤面の上端に薄く重ね、プレイの邪魔をしない位置に置く。
+    // 本編のミッションは hint を持たないので、通常プレイでは常に空＝画面は従来どおり
+    this.hudHint = this.add
+      .text(w / 2, 48, "", {
+        ...hudStyle,
+        fontSize: "15px",
+        color: COLORS.RECORD_CSS,
+        backgroundColor: "#11141ce6",
+        padding: { x: 10, y: 5 },
+      })
+      .setOrigin(0.5, 0.5)
       .setDepth(5);
 
     // --- オーバーレイ（バナー・ポーズ・ゲームオーバー・全クリア） ---
@@ -568,7 +584,8 @@ export class GameScene extends Phaser.Scene {
     //   テストプレイ … 記録対象外（GDD §12.7）
     const missionNumber =
       this.mode === "timeAttack" ? this.timeAttackMission : idx + 1;
-    const keepsMissionTime = !this.customPlay && this.mode !== "survival";
+    const keepsMissionTime =
+      !this.customPlay && this.mode !== "survival" && this.mode !== "tutorial";
     const newRecord = keepsMissionTime ? this.records.submitMissionTime(missionNumber, time) : false;
     if (!this.customPlay && this.mode === "campaign") this.records.submitReached(idx + 2);
     if (newRecord) this.newRecordMissions.add(missionNumber);
@@ -585,7 +602,8 @@ export class GameScene extends Phaser.Scene {
    * ここが実績の唯一の提出点＝「クリアの度に少しずつ解除される」ような散らばりを作らない。
    */
   private finishRun(allCleared: boolean): void {
-    if (this.customPlay) return; // テストプレイは記録・実績とも対象外（GDD §12.7）
+    // テストプレイ（§12.7）と練習（§8.8）は記録・実績とも対象外
+    if (this.customPlay || this.mode === "tutorial") return;
     const cleared = this.world.clearedTimes.filter((t) => t !== undefined).length;
     if (this.mode === "survival") this.records.submitSurvival(cleared);
     this.unlockedFx = this.achievements.submit({
@@ -726,6 +744,11 @@ export class GameScene extends Phaser.Scene {
     if (!ended) return false;
     if (this.customPlay) {
       this.scene.start("EditorScene"); // テストプレイ終了 → エディタへ戻る（GDD §12.7）
+      return true;
+    }
+    // 練習は勝っても負けてもタイトルへ（本編へ送り出す。GDD §8.8）
+    if (this.mode === "tutorial") {
+      this.scene.start("TitleScene");
       return true;
     }
     // タイムアタックは1面ごとの遊びなので、勝っても負けても選択画面へ戻す（GDD §8.7）
@@ -975,6 +998,8 @@ export class GameScene extends Phaser.Scene {
     // 残弾・残地雷（●＝撃てる／○＝場に出ていて撃てない。GDD §8 v0.17）
     this.hudAmmo1.setText(this.ammoText(0));
     this.hudAmmo2.setText(this.playerCount === 2 ? this.ammoText(1) : "");
+    // ミッションが hint を持つとき（＝チュートリアル）だけ一言を出す。GDD §8.8
+    this.hudHint.setText(world.missions[world.missionIndex]?.hint ?? "");
 
     // オーバーレイ
     const h = BALANCE.TILE * BALANCE.ROWS;
@@ -1004,7 +1029,10 @@ export class GameScene extends Phaser.Scene {
             ? `${this.survivalResultText()}\n\n${this.unlockedText()}R またはクリックでもう一度（並びはシャッフルし直す）`
             : "R またはクリックで M1 から再スタート";
     } else if (world.status === "allclear") {
-      if (this.mode === "timeAttack") {
+      if (this.mode === "tutorial") {
+        title = "れんしゅう おわり";
+        sub = "これで基本はすべてです。\n\nR またはクリックでタイトルへ（本編へどうぞ）";
+      } else if (this.mode === "timeAttack") {
         title = "CLEAR!";
         sub =
           `M${this.timeAttackMission} タイム ${formatTime(world.lastClearTime ?? 0)}s\n\n` +

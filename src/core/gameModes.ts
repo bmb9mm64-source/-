@@ -5,6 +5,7 @@
  * **盤面は増やさない**（新しいミッションを作るのではなく、既存50面の遊び方を変えるだけ）。
  *
  *   campaign … 従来どおり M1 から順に、難易度ぶんの残機で通す
+ *   tutorial … 跳弾を段階的に教える3面（本編とは別立て。GDD §8.8）
  *   timeAttack … 選んだ1面だけを残機1で遊ぶ。クリアしたらミッション選択へ戻る＝記録を詰める遊び
  *   survival … 全50面をシャッフルして残機1で連続。どこまで行けたかが記録
  *
@@ -16,12 +17,16 @@
 import type { Rng } from "./mathUtils";
 import type { MissionDef } from "./world";
 
+/** チュートリアルの残機（教え切る前に終わらせないため多め） */
+export const TUTORIAL_LIVES = 9;
+
 /** 遊び方のモード */
-export type GameMode = "campaign" | "timeAttack" | "survival";
+export type GameMode = "campaign" | "tutorial" | "timeAttack" | "survival";
 
 /** 画面に出す名前 */
 export const MODE_LABELS: Record<GameMode, string> = {
   campaign: "キャンペーン",
+  tutorial: "れんしゅう",
   timeAttack: "タイムアタック",
   survival: "サバイバル",
 };
@@ -32,6 +37,8 @@ export const MODE_LABELS: Record<GameMode, string> = {
  */
 export const MODE_LIVES: Record<GameMode, number | null> = {
   campaign: null,
+  // 練習で残機切れになると教える前に終わってしまうので多めに固定する
+  tutorial: TUTORIAL_LIVES,
   timeAttack: 1,
   survival: 1,
 };

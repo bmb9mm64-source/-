@@ -53,6 +53,11 @@ export type { EnemyTank }; // 敵戦車の型は enemyRegistry.ts が持つ（�
 export interface MissionDef {
   name: string;
   grid: readonly string[];
+  /**
+   * プレイ中に画面下へ出す一言（GDD §8.8。チュートリアルだけが持つ）。
+   * 本編のミッションは持たない＝通常プレイの画面は従来どおり何も増えない。
+   */
+  hint?: string;
 }
 
 /** 1フレーム中に起きた出来事（シーンが効果音・演出に使う） */

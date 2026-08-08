@@ -197,12 +197,44 @@ export class TitleScene extends Phaser.Scene {
     // ステージエディタへの入口（GDD §12.7）
     textButton(
       this,
-      hasContinue ? w / 2 + 150 : w / 2,
+      hasContinue ? w / 2 + 150 : w / 2 + 90,
       h / 2 + 208,
       touchOnly ? "エディタ" : "[E] エディタ",
       subStyle,
       () => this.scene.start("EditorScene"),
     );
+
+    // 練習（チュートリアル）への入口（GDD §8.8）。
+    // まだ一度も遊んでいない人にこそ必要なので、「続きから」が無いときも必ず出す。
+    if (!hasContinue) {
+      textButton(
+        this,
+        w / 2 - 90,
+        h / 2 + 208,
+        touchOnly ? "はじめての方へ" : "[0] はじめての方へ",
+        { ...subStyle, backgroundColor: "#3a5a3f" },
+        () => {
+          SFX.unlock();
+          this.scene.start("GameScene", { mode: "tutorial", playerCount: 1 });
+        },
+      );
+    } else {
+      textButton(
+        this,
+        w / 2 - 300,
+        h / 2 + 208,
+        touchOnly ? "れんしゅう" : "[0] れんしゅう",
+        subStyle,
+        () => {
+          SFX.unlock();
+          this.scene.start("GameScene", { mode: "tutorial", playerCount: 1 });
+        },
+      );
+    }
+    this.input.keyboard?.on("keydown-ZERO", () => {
+      SFX.unlock();
+      this.scene.start("GameScene", { mode: "tutorial", playerCount: 1 });
+    });
 
     const kb = this.input.keyboard;
     kb?.on("keydown-ONE", () => start(1));
@@ -212,7 +244,7 @@ export class TitleScene extends Phaser.Scene {
     // 実際に押せるキーだけを案内する（「続きから」が無いときに 3 を案内しない。v0.17）
     const keyHint = touchOnly
       ? "ボタンをタップして選択"
-      : `クリックまたは ${hasContinue ? "1 / 2 / 3 / 4 / 5 / E" : "1 / 2 / E"} キーで選択`;
+      : `クリックまたは ${hasContinue ? "0 / 1 / 2 / 3 / 4 / 5 / E" : "0 / 1 / 2 / E"} キーで選択`;
     const prompt = this.add
       .text(w / 2, h / 2 + 236, keyHint, {
         ...textStyle,
