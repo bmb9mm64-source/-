@@ -12,7 +12,7 @@
  * `BALANCE.TILE * BALANCE.COLS` を再計算しない）。
  */
 import { BALANCE, COLORS } from "../config/balance";
-import { TEXT_RESOLUTION, VIEW_H, VIEW_W } from "./renderScale";
+import { BOARD_H, TEXT_RESOLUTION, VIEW_H, VIEW_W } from "./renderScale";
 
 /** グリッド線の描き方 */
 export interface FloorGridOptions {
@@ -39,12 +39,16 @@ export function drawFloorGrid(
   const { fill = true, gridAlpha = 1, halfPixel = true } = options;
   const t = BALANCE.TILE;
   const off = halfPixel ? 0.5 : 0;
+  // 縦持ちでは canvas が盤面より縦に長い（操作帯のぶん。GDD §3.6）。
+  // 塗りは canvas 全体に、目地は盤面の範囲にだけ引く（帯に盤面の目地を延ばすと盤面の続きに見える）。
   if (fill) {
+    // カメラを縦にずらす画面（メニュー系。renderScale の centerBoard）でも
+    // 下地が途切れないよう、表示範囲より広めに塗る
     g.fillStyle(COLORS.FLOOR, 1);
-    g.fillRect(0, 0, VIEW_W, VIEW_H);
+    g.fillRect(0, -VIEW_H, VIEW_W, VIEW_H * 3);
   }
   g.lineStyle(1, COLORS.FLOOR_GRID, gridAlpha);
-  for (let c = 1; c < BALANCE.COLS; c++) g.lineBetween(c * t + off, 0, c * t + off, VIEW_H);
+  for (let c = 1; c < BALANCE.COLS; c++) g.lineBetween(c * t + off, 0, c * t + off, BOARD_H);
   for (let r = 1; r < BALANCE.ROWS; r++) g.lineBetween(0, r * t + off, VIEW_W, r * t + off);
 }
 

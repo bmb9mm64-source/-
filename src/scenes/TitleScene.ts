@@ -30,7 +30,7 @@ export class TitleScene extends Phaser.Scene {
   }
 
   create(): void {
-    applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
+    applyRenderScale(this, { centerBoard: true }); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
     this.input.setDefaultCursor("default"); // タイトルでは OS カーソルを表示

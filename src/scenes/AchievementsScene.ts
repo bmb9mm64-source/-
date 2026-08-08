@@ -8,7 +8,7 @@
 import Phaser from "phaser";
 import { AchievementStore, ACHIEVEMENTS } from "../core/achievements";
 import { type RecordStore, safeLocalStorageStore } from "../core/records";
-import { applyRenderScale, TEXT_RESOLUTION, VIEW_H, VIEW_W } from "./renderScale";
+import { applyRenderScale, BOARD_H, BOARD_W, TEXT_RESOLUTION } from "./renderScale";
 import { bindSceneAudio } from "./sceneAudio";
 import { drawFloorGrid, textButton } from "./sceneUi";
 
@@ -23,7 +23,7 @@ export class AchievementsScene extends Phaser.Scene {
   }
 
   create(): void {
-    applyRenderScale(this);
+    applyRenderScale(this, { centerBoard: true });
     this.input.setDefaultCursor("default");
     drawFloorGrid(this.add.graphics());
 
@@ -32,10 +32,10 @@ export class AchievementsScene extends Phaser.Scene {
     const list = achievements.list();
 
     this.add
-      .text(VIEW_W / 2, 40, "実績", { ...label, fontSize: "26px" })
+      .text(BOARD_W / 2, 40, "実績", { ...label, fontSize: "26px" })
       .setOrigin(0.5);
     this.add
-      .text(VIEW_W / 2, 70, `${achievements.unlockedCount()} / ${ACHIEVEMENTS.length} 達成`, {
+      .text(BOARD_W / 2, 70, `${achievements.unlockedCount()} / ${ACHIEVEMENTS.length} 達成`, {
         ...label,
         fontSize: "14px",
         color: "#9aa3b5",
@@ -67,8 +67,8 @@ export class AchievementsScene extends Phaser.Scene {
 
     textButton(
       this,
-      VIEW_W / 2,
-      VIEW_H - 34,
+      BOARD_W / 2,
+      BOARD_H - 34,
       "[T] もどる",
       { ...label, fontSize: "16px", backgroundColor: "#2b3040", padding: { x: 12, y: 5 } },
       () => this.scene.start("MissionSelectScene"),

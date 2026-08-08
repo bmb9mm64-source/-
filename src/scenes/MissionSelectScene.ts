@@ -14,7 +14,7 @@ import { AchievementStore } from "../core/achievements";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
 import { formatTime, Records, type RecordStore, safeLocalStorageStore } from "../core/records";
 import { ALL_MISSIONS } from "../stages/allMissions";
-import { applyRenderScale, TEXT_RESOLUTION, VIEW_H, VIEW_W } from "./renderScale";
+import { applyRenderScale, BOARD_H, BOARD_W, TEXT_RESOLUTION } from "./renderScale";
 import { bindSceneAudio } from "./sceneAudio";
 import { drawFloorGrid, textButton } from "./sceneUi";
 
@@ -33,7 +33,7 @@ export class MissionSelectScene extends Phaser.Scene {
   }
 
   create(): void {
-    applyRenderScale(this);
+    applyRenderScale(this, { centerBoard: true });
     this.input.setDefaultCursor("default");
     drawFloorGrid(this.add.graphics());
 
@@ -43,11 +43,11 @@ export class MissionSelectScene extends Phaser.Scene {
 
     const label = { fontFamily: "sans-serif", color: "#e8ecf5", resolution: TEXT_RESOLUTION };
     this.add
-      .text(VIEW_W / 2, 40, "タイムアタック — ミッション選択", { ...label, fontSize: "26px" })
+      .text(BOARD_W / 2, 40, "タイムアタック — ミッション選択", { ...label, fontSize: "26px" })
       .setOrigin(0.5);
     this.add
       .text(
-        VIEW_W / 2,
+        BOARD_W / 2,
         72,
         `[${DIFFICULTY_LABELS[this.difficulty]}]　残機1で1面だけ遊びます　到達済み: M1〜M${reached}`,
         { ...label, fontSize: "14px", color: "#9aa3b5" },
@@ -55,7 +55,7 @@ export class MissionSelectScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const gridW = COLUMNS * CELL_W;
-    const left = (VIEW_W - gridW) / 2 + CELL_W / 2;
+    const left = (BOARD_W - gridW) / 2 + CELL_W / 2;
     ALL_MISSIONS.forEach((_m, i) => {
       const n = i + 1;
       const x = left + (i % COLUMNS) * CELL_W;
@@ -91,16 +91,16 @@ export class MissionSelectScene extends Phaser.Scene {
     const unlocked = new AchievementStore(this.store).unlockedCount();
     textButton(
       this,
-      VIEW_W / 2 - 110,
-      VIEW_H - 34,
+      BOARD_W / 2 - 110,
+      BOARD_H - 34,
       `実績（${unlocked}）`,
       { ...label, fontSize: "16px", backgroundColor: "#2b3040", padding: { x: 12, y: 5 } },
       () => this.scene.start("AchievementsScene"),
     );
     textButton(
       this,
-      VIEW_W / 2 + 110,
-      VIEW_H - 34,
+      BOARD_W / 2 + 110,
+      BOARD_H - 34,
       "[T] タイトルへ",
       { ...label, fontSize: "16px", backgroundColor: "#2b3040", padding: { x: 12, y: 5 } },
       () => this.scene.start("TitleScene"),

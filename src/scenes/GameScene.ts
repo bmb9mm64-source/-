@@ -25,7 +25,16 @@ import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
-import { applyRenderScale, TEXT_RESOLUTION, toGameCoord } from "./renderScale";
+import {
+  applyRenderScale,
+  BOARD_H,
+  BOARD_W,
+  TEXT_RESOLUTION,
+  toGameCoord,
+  TOUCH_BAND_H,
+  VIEW_H,
+  VIEW_W,
+} from "./renderScale";
 import { drawFloorGrid } from "./sceneUi";
 import { bindSceneAudio } from "./sceneAudio";
 import {
@@ -168,8 +177,10 @@ export class GameScene extends Phaser.Scene {
     } = {},
   ): void {
     applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
-    const w = BALANCE.TILE * BALANCE.COLS;
-    const h = BALANCE.TILE * BALANCE.ROWS;
+    // シーンの部品はすべて盤面（800×544）の中に置く。
+    // 縦持ちで下に伸びる操作帯（GDD §3.6）に置くのは仮想コントロールだけ。
+    const w = BOARD_W;
+    const h = BOARD_H;
 
     this.playerCount = data.playerCount === 2 ? 2 : 1;
     // エディタからのテストプレイ（GDD §12.7）：カスタム1ミッション構成・ベスト記録は対象外
@@ -237,6 +248,15 @@ export class GameScene extends Phaser.Scene {
     this.input.setDefaultCursor("none"); // 自前の十字カーソルを描くため OS カーソルは隠す
     this.input.mouse?.disableContextMenu(); // 右クリック＝地雷設置のためコンテキストメニューを抑止
 
+    // --- 縦持ちの操作帯の下地（GDD §3.6）。盤面と地続きに見えないよう暗く沈める ---
+    if (TOUCH_BAND_H > 0) {
+      const band = this.add.graphics().setDepth(0);
+      band.fillStyle(COLORS.OVERLAY, 0.55);
+      band.fillRect(0, BOARD_H, VIEW_W, TOUCH_BAND_H);
+      band.lineStyle(2, COLORS.FLOOR_GRID, 1);
+      band.lineBetween(0, BOARD_H + 1, VIEW_W, BOARD_H + 1);
+    }
+
     // --- 盤面レイヤー（版が変わった時のみ描き直す） ---
     this.stageGfx = this.add.graphics().setDepth(0);
 
@@ -283,7 +303,7 @@ export class GameScene extends Phaser.Scene {
     // --- オーバーレイ（バナー・ポーズ・ゲームオーバー・全クリア） ---
     this.overlayGfx = this.add.graphics().setDepth(10).setVisible(false);
     this.overlayGfx.fillStyle(COLORS.OVERLAY, COLORS.OVERLAY_ALPHA);
-    this.overlayGfx.fillRect(0, 0, w, h);
+    this.overlayGfx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.overlayTitle = this.add
       .text(w / 2, h / 2 - 18, "", {
         fontFamily: "sans-serif",
@@ -411,9 +431,8 @@ export class GameScene extends Phaser.Scene {
       });
     }
     if (!this.touchMode) return null;
-    const w = BALANCE.TILE * BALANCE.COLS;
-    const h = BALANCE.TILE * BALANCE.ROWS;
-    this.lastTouch = this.touch.resolve(points, w, h);
+    // 縦持ちでは盤面の下の操作帯まで含めた canvas 全体をタッチ領域として使う（GDD §3.6）
+    this.lastTouch = this.touch.resolve(points, VIEW_W, VIEW_H);
     return this.lastTouch;
   }
 
@@ -423,11 +442,9 @@ export class GameScene extends Phaser.Scene {
     g.clear();
     if (!this.touchMode) return;
     const c = BALANCE.TOUCH;
-    const w = BALANCE.TILE * BALANCE.COLS;
-    const h = BALANCE.TILE * BALANCE.ROWS;
-
-    // 地雷・ポーズボタン（常時表示。押しやすさのため大きめ）
-    const mine = mineButtonRect(w, h);
+    // ボタンの位置はタッチ判定（resolve）と同じ canvas 全体を基準にする。
+    // 縦持ちでは地雷ボタンが操作帯の右下に降りる（GDD §3.6）
+    const mine = mineButtonRect(VIEW_W, VIEW_H);
     g.fillStyle(COLORS.MINE, c.UI_ALPHA);
     g.fillRoundedRect(mine.x, mine.y, mine.w, mine.h, 12);
     g.lineStyle(2, COLORS.MINE_LAMP, c.UI_ALPHA + 0.25);
@@ -435,7 +452,7 @@ export class GameScene extends Phaser.Scene {
     g.fillStyle(COLORS.MINE_LAMP, c.UI_ALPHA + 0.3);
     g.fillCircle(mine.x + mine.w / 2, mine.y + mine.h / 2, 13);
 
-    const pause = pauseButtonRect(w, h);
+    const pause = pauseButtonRect(VIEW_W, VIEW_H);
     g.fillStyle(COLORS.WALL, c.UI_ALPHA);
     g.fillRoundedRect(pause.x, pause.y, pause.w, pause.h, 8);
     g.fillStyle(COLORS.CROSSHAIR, c.UI_ALPHA + 0.3);

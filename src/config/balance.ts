@@ -32,6 +32,10 @@ export const BALANCE = {
     HUD_HEIGHT: 32, // HUD 帯の高さ [px]（ポーズボタンを HUD の下に置くため）
     UI_ALPHA: 0.28, // 仮想コントロールの不透明度（プレイの邪魔をしない薄さ）
     MAX_POINTERS: 3, // 同時に扱う指の数（移動＋照準＋ボタン）
+    // 縦持ちレイアウト（GDD §3.6 v0.23）：盤面の下へ足す操作帯の高さ [px]。
+    // 実際の高さは画面の縦横比から決める（renderScale.ts）。ここは念のための上下限。
+    PORTRAIT_BAND_MIN: 240, // これ未満だと親指の可動域に足りない
+    PORTRAIT_BAND_MAX: 1400, // 極端に縦長な画面でも帯が伸びすぎないように
   },
 
   INPUT: {
