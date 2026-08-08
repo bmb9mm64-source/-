@@ -9,7 +9,6 @@
  * - 書き出し/読み込みは prompt()（コピペ共有。GDD §12.7）。
  */
 import Phaser from "phaser";
-import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import {
@@ -28,6 +27,7 @@ import {
 import type { EnemyChar } from "../core/enemyKinds";
 import { ENEMY_DEF_BY_CHAR } from "../core/enemyRegistry";
 import { safeLocalStorageStore } from "../core/records";
+import { bindSceneAudio } from "./sceneAudio";
 
 /** 非敵タイルの表示ラベル（敵は記号から「敵A」…を機械的に作る） */
 const BASE_LABELS: Record<string, string> = {
@@ -94,10 +94,10 @@ export class EditorScene extends Phaser.Scene {
     };
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       SFX.unlock();
-      BGM.play("editor"); // エディタは静かな曲（GDD §9 v0.11）
       paint(p);
     });
-    BGM.play("editor");
+    // 音（BGM 開始・M/B のミュート切替）は全シーン共通の結線を使う。エディタは静かな曲（GDD §9）
+    bindSceneAudio(this, "editor");
     this.input.on("pointermove", paint);
 
     // --- 上バー：タイルパレット（外周 row0 に重ねる） ---

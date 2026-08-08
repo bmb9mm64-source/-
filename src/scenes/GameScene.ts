@@ -11,7 +11,6 @@
  *   入力はすべて core の PlayerInput 型に正規化して GameWorld に渡す。
  */
 import Phaser from "phaser";
-import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
@@ -24,6 +23,7 @@ import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
+import { bindSceneAudio } from "./sceneAudio";
 import {
   mineButtonRect,
   pauseButtonRect,
@@ -188,7 +188,6 @@ export class GameScene extends Phaser.Scene {
     if (this.input.manager.pointersTotal < BALANCE.TOUCH.MAX_POINTERS) {
       this.input.addPointer(BALANCE.TOUCH.MAX_POINTERS - this.input.manager.pointersTotal);
     }
-    BGM.play("game"); // AudioContext 未初期化なら無音（後述の unlock 時に鳴り始める）
     this.explosionsFx = [];
     this.particles = [];
     this.lastStageVersion = -1;
@@ -321,25 +320,8 @@ export class GameScene extends Phaser.Scene {
       SFX.unlock();
       this.mine2Requested = true;
     });
-    // M：効果音とBGMのミュート切替（共通。GDD §9 v0.11）
-    onKeyPress("M", () => {
-      SFX.unlock();
-      const muted = SFX.toggleMute();
-      BGM.setMuted(muted);
-      if (!muted) BGM.play("game");
-    });
-    // B：BGM だけのミュート切替（GDD §9 v0.11）
-    onKeyPress("B", () => {
-      SFX.unlock();
-      if (!BGM.toggleMute()) BGM.play("game");
-    });
-    // 最初のユーザー操作で音を初期化して BGM を鳴らし始める（ブラウザの自動再生制限対策）
-    const startAudio = (): void => {
-      SFX.unlock();
-      BGM.play("game");
-    };
-    kb.on("keydown", startAudio);
-    this.input.on("pointerdown", startAudio);
+    // 音（BGM 開始・M/B のミュート切替）は全シーン共通の結線を使う（GDD §9）
+    bindSceneAudio(this, "game");
 
     // クリック：1P 射撃（左）／地雷（右）。終了画面では再開操作
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {

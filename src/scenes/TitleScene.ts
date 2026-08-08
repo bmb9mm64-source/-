@@ -5,7 +5,6 @@
  * 描画はすべてコード描画（外部アセット禁止・オリジナル配色）。
  */
 import Phaser from "phaser";
-import { BGM } from "../audio/bgm";
 import { SFX } from "../audio/sfx";
 import { BALANCE, COLORS } from "../config/balance";
 import {
@@ -16,6 +15,7 @@ import {
   saveDifficulty,
 } from "../core/difficulty";
 import { formatTime, Records, type RecordStore, safeLocalStorageStore } from "../core/records";
+import { bindSceneAudio } from "./sceneAudio";
 
 export class TitleScene extends Phaser.Scene {
   private store: RecordStore = safeLocalStorageStore();
@@ -133,15 +133,8 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.refreshDifficultyUi();
 
-    // モード選択（クリックまたは 1 / 2 キー）
-    // 最初のユーザー操作で音を初期化し、タイトルBGMを鳴らす（自動再生制限対策。GDD §9 v0.11）
-    const startAudio = (): void => {
-      SFX.unlock();
-      BGM.play("title");
-    };
-    this.input.on("pointerdown", startAudio);
-    this.input.keyboard?.on("keydown", startAudio);
-    BGM.play("title"); // 既に初期化済み（別シーンから戻ってきた場合）なら即座に切り替わる
+    // 音（BGM 開始・M/B のミュート切替）は全シーン共通の結線を使う（GDD §9）
+    bindSceneAudio(this, "title");
 
     const start = (playerCount: number, startMission?: number): void => {
       SFX.unlock(); // AudioContext はユーザー操作後に初期化（自動再生制限対策）

@@ -25,7 +25,18 @@ class BgmEngine {
   private track: BgmTrack | null = null;
   private nextTime = 0; // 次に予約するステップの時刻 [s]（AudioContext 時間）
   private step = 0; // ループ内の通し歩数
-  muted = false;
+  /**
+   * ミュートの内訳（GDD §9 v0.17）。実際に鳴るかは masterMuted と userMuted の論理和で決まる。
+   * 2つに分けているのは、B で BGM だけ消したあとに M を2回押すと BGM が復活してしまったため
+   * （M の解除が B の指定を上書きしていた）。それぞれの意思を別々に覚えて合成する。
+   */
+  private masterMuted = false; // M キー（効果音と共通のミュート）
+  private userMuted = false; // B キー（BGM だけのミュート）
+
+  /** 実際にミュートされているか（どちらか一方でも立っていれば無音） */
+  get muted(): boolean {
+    return this.masterMuted || this.userMuted;
+  }
 
   /** 現在鳴らしている曲（止まっていれば null） */
   current(): BgmTrack | null {
@@ -68,11 +79,27 @@ class BgmEngine {
     this.track = null;
   }
 
-  /** ミュート状態を設定する（M＝効果音と共通、B＝BGMのみ から呼ばれる） */
+  /** 効果音と共通のミュート（M キー）を設定する */
   setMuted(muted: boolean): void {
-    if (this.muted === muted) return;
-    this.muted = muted;
-    if (muted) {
+    this.applyMute(() => {
+      this.masterMuted = muted;
+    });
+  }
+
+  /** BGM だけのミュート切替（B キー）。切替後の「BGM だけの」ミュート状態を返す */
+  toggleMute(): boolean {
+    this.applyMute(() => {
+      this.userMuted = !this.userMuted;
+    });
+    return this.userMuted;
+  }
+
+  /** ミュート内訳を書き換え、実効状態が変わったときだけ停止・再開する */
+  private applyMute(change: () => void): void {
+    const before = this.muted;
+    change();
+    if (this.muted === before) return;
+    if (this.muted) {
       const keep = this.track;
       this.stop();
       this.track = keep; // 解除時に同じ曲へ戻れるよう保持
@@ -81,12 +108,6 @@ class BgmEngine {
       this.track = null;
       this.play(t);
     }
-  }
-
-  /** BGM のみのミュート切替（B キー）。切替後の状態を返す */
-  toggleMute(): boolean {
-    this.setMuted(!this.muted);
-    return this.muted;
   }
 
   /** 先読み予約：現在時刻から SCHEDULE_AHEAD 秒先までのステップを予約する */

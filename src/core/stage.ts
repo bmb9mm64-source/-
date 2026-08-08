@@ -11,6 +11,7 @@ import { BALANCE } from "../config/balance";
 import {
   emptyEnemySpawns,
   ENEMY_KIND_BY_CHAR,
+  ENEMY_KINDS,
   type EnemySpawns,
   isEnemyChar,
 } from "./enemyKinds";
@@ -92,17 +93,30 @@ const COOP_SPAWN_OFFSETS: ReadonlyArray<readonly [number, number]> = [
 ];
 
 /**
- * origin（px 座標）のタイルの近傍から床 '.' タイルの中心を探す（2P 初期位置用）。
- * 全ミッションで P の隣に床があることは missions のテストで担保する。
+ * origin（px 座標）のタイルの近傍から、2P を置ける床タイルの中心を探す。
+ *
+ * パース時に敵の記号は '.' へ置き換わるので、床かどうかだけを見ると
+ * **敵の初期位置に 2P が重なって湧く**（戦車同士は通り抜け不可なので動けなくなる）。
+ * 敵のいるタイルは除外する（v0.17 修正）。
+ * 全ミッションで P の隣に置ける床があることは missions のテストで担保する。
  * 万一見つからなければ origin をそのまま返す（保険）。
  */
 export function findNearbyFloor(stage: ParsedStage, origin: Vec2): Vec2 {
   const t = stage.tile;
   const c0 = Math.floor(origin.x / t);
   const r0 = Math.floor(origin.y / t);
+  // 敵が占めているタイル（"列,行"）。敵は多くても十数体なので毎回作って構わない
+  const taken = new Set<string>();
+  for (const kind of ENEMY_KINDS) {
+    for (const sp of stage.spawns[kind]) {
+      taken.add(`${Math.floor(sp.x / t)},${Math.floor(sp.y / t)}`);
+    }
+  }
   for (const [dc, dr] of COOP_SPAWN_OFFSETS) {
-    if (tileAt(stage, c0 + dc, r0 + dr) === ".") {
-      return { x: (c0 + dc) * t + t / 2, y: (r0 + dr) * t + t / 2 };
+    const c = c0 + dc;
+    const r = r0 + dr;
+    if (tileAt(stage, c, r) === "." && !taken.has(`${c},${r}`)) {
+      return { x: c * t + t / 2, y: r * t + t / 2 };
     }
   }
   return { x: origin.x, y: origin.y };
