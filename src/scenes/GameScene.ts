@@ -19,6 +19,8 @@ import { ENEMY_DEFS } from "../core/enemyRegistry";
 import { eightWayAngle, type PlayerInput } from "../core/input";
 import { liveMineCount } from "../core/mine";
 import { missileShape, prismShape, sniperShape } from "../core/missileShape";
+import { AchievementStore, type AchievementDef } from "../core/achievements";
+import { type GameMode, MODE_LABELS, MODE_LIVES, shuffleMissions } from "../core/gameModes";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
@@ -110,6 +112,12 @@ export class GameScene extends Phaser.Scene {
   private newRecordMissions = new Set<number>(); // このランでベスト更新したミッション番号（1始まり。全クリア一覧の ★NEW! 表示用）
   private clearFx: ClearFx | null = null; // ミッションクリア演出（バナー中に CLEAR! を表示）
   private allClearText = ""; // 全クリア画面のタイム一覧（allClear イベント時に構築）
+  private mode: GameMode = "campaign"; // 遊び方（GDD §8.7 v0.23）
+  /** タイムアタックで遊んでいるミッション番号（1始まり）。記録の宛先に使う */
+  private timeAttackMission = 1;
+  private livesAtStart = 0; // ラン開始時の残機（実績「無傷の帰還」の判定用）
+  private achievements = new AchievementStore(safeLocalStorageStore());
+  private unlockedFx: AchievementDef[] = []; // このランで新たに解除した実績（終了画面で見せる）
 
   private keys!: {
     w: Phaser.Input.Keyboard.Key;
@@ -154,6 +162,7 @@ export class GameScene extends Phaser.Scene {
       customStage?: string[];
       returnTo?: "editor";
       startMission?: number; // 「続きから」で開始するミッション番号（1始まり。GDD §8.6）
+      mode?: GameMode; // 遊び方（省略時はキャンペーン。GDD §8.7）
     } = {},
   ): void {
     applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
@@ -163,18 +172,38 @@ export class GameScene extends Phaser.Scene {
     this.playerCount = data.playerCount === 2 ? 2 : 1;
     // エディタからのテストプレイ（GDD §12.7）：カスタム1ミッション構成・ベスト記録は対象外
     this.customPlay = data.returnTo === "editor" && Array.isArray(data.customStage);
-    const missions = this.customPlay
-      ? [{ name: "カスタムステージ", grid: data.customStage! }]
-      : ALL_MISSIONS;
-    // 選択中の難易度でワールドを生成（エディタのテストプレイにも適用。GDD §8.3）
-    this.difficulty = loadDifficulty(safeLocalStorageStore());
-    this.world = new GameWorld(missions, Math.random, this.playerCount, this.difficulty);
+    this.mode = this.customPlay ? "campaign" : (data.mode ?? "campaign");
     // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる（本編のみ）
     const mParam = Number(new URLSearchParams(window.location.search).get("m"));
     const start = Number.isInteger(data.startMission) ? data.startMission! : mParam;
-    if (!this.customPlay && Number.isInteger(start) && start >= 1 && start <= ALL_MISSIONS.length) {
-      this.world.loadMission(start - 1);
+    const validStart =
+      Number.isInteger(start) && start >= 1 && start <= ALL_MISSIONS.length ? start : 0;
+    this.timeAttackMission = validStart || 1;
+    this.difficulty = loadDifficulty(safeLocalStorageStore());
+    // モードごとにミッションの並びを決める（GDD §8.7）
+    //   テストプレイ … エディタの1面だけ
+    //   タイムアタック … 選んだ1面だけ（記録の宛先は timeAttackMission）
+    //   サバイバル … 全50面をシャッフル
+    //   キャンペーン … 従来どおりの並び
+    const missions = this.customPlay
+      ? [{ name: "カスタムステージ", grid: data.customStage! }]
+      : this.mode === "timeAttack"
+        ? [ALL_MISSIONS[this.timeAttackMission - 1]!]
+        : this.mode === "survival"
+          ? shuffleMissions(ALL_MISSIONS, Math.random)
+          : ALL_MISSIONS;
+    this.world = new GameWorld(
+      missions,
+      Math.random,
+      this.playerCount,
+      this.difficulty,
+      MODE_LIVES[this.mode],
+    );
+    // キャンペーンだけは途中のミッションから始められる（他モードは並びを組み替え済み）
+    if (!this.customPlay && this.mode === "campaign" && validStart) {
+      this.world.loadMission(validStart - 1);
     }
+    this.livesAtStart = this.world.lives;
     this.paused = false;
     this.fireRequested = false;
     this.mineRequested = false;
@@ -195,6 +224,8 @@ export class GameScene extends Phaser.Scene {
     this.particles = [];
     this.lastStageVersion = -1;
     this.records = new Records(safeLocalStorageStore(), this.difficulty); // ベスト記録は難易度別（GDD §8.3）
+    this.achievements = new AchievementStore(safeLocalStorageStore());
+    this.unlockedFx = [];
     this.newRecordMissions = new Set();
     this.clearFx = null;
     this.allClearText = "";
@@ -465,7 +496,8 @@ export class GameScene extends Phaser.Scene {
       // ワールドの出来事を効果音・演出・記録更新に変換する
       for (const ev of this.world.events) {
         SFX.play(ev);
-        if (ev === "missionClear" || ev === "allClear") this.onMissionCleared(ev === "allClear");
+  if (ev === "missionClear" || ev === "allClear") this.onMissionCleared(ev === "allClear");
+        if (ev === "gameOver") this.finishRun(false);
       }
       // 戦車撃破：破片パーティクル＋小フラッシュ（GDD §8.5）
       for (const d of this.world.lastDestroyedTanks) this.spawnDestroyFx(d.x, d.y);
@@ -529,16 +561,43 @@ export class GameScene extends Phaser.Scene {
     const idx = this.world.lastClearIndex;
     const time = this.world.lastClearTime;
     if (idx === null || time === null) return;
-    // テストプレイはベスト記録の対象外（GDD §12.7）
-    const newRecord = this.customPlay ? false : this.records.submitMissionTime(idx + 1, time);
-    // 到達記録の更新（次のミッションから「続きから」始められるようにする。GDD §8.6）
-    if (!this.customPlay) this.records.submitReached(idx + 2);
-    if (newRecord) this.newRecordMissions.add(idx + 1);
+    // 記録の宛先はモードで変わる（GDD §8.7）。
+    //   キャンペーン … クリアした添字＝ミッション番号。到達記録も更新する
+    //   タイムアタック … 遊んでいる1面の番号。並びを組み替えているので添字は使えない
+    //   サバイバル … 面ごとのタイムは残さない（シャッフルされた並びの記録に意味がないため）
+    //   テストプレイ … 記録対象外（GDD §12.7）
+    const missionNumber =
+      this.mode === "timeAttack" ? this.timeAttackMission : idx + 1;
+    const keepsMissionTime = !this.customPlay && this.mode !== "survival";
+    const newRecord = keepsMissionTime ? this.records.submitMissionTime(missionNumber, time) : false;
+    if (!this.customPlay && this.mode === "campaign") this.records.submitReached(idx + 2);
+    if (newRecord) this.newRecordMissions.add(missionNumber);
     if (isAllClear) {
       this.buildAllClearText();
+      this.finishRun(true);
     } else {
       this.clearFx = { time, newRecord, timer: BALANCE.FX.CLEAR_BANNER_TIME };
     }
+  }
+
+  /**
+   * ランの終了（全クリア／ゲームオーバー）で記録と実績をまとめて提出する（GDD §8.7）。
+   * ここが実績の唯一の提出点＝「クリアの度に少しずつ解除される」ような散らばりを作らない。
+   */
+  private finishRun(allCleared: boolean): void {
+    if (this.customPlay) return; // テストプレイは記録・実績とも対象外（GDD §12.7）
+    const cleared = this.world.clearedTimes.filter((t) => t !== undefined).length;
+    if (this.mode === "survival") this.records.submitSurvival(cleared);
+    this.unlockedFx = this.achievements.submit({
+      mode: this.mode,
+      difficulty: this.difficulty,
+      playerCount: this.playerCount,
+      clearedCount: cleared,
+      reachedMission: this.mode === "campaign" ? this.world.missionIndex + 1 : this.timeAttackMission,
+      allCleared: allCleared && this.mode === "campaign",
+      noMiss: this.world.lives >= this.livesAtStart,
+      lastClearTime: this.world.lastClearTime,
+    });
   }
 
   /** 全クリア画面のタイム一覧（各ミッション・合計・ベスト比較）を構築する（GDD §8.5） */
@@ -669,12 +728,35 @@ export class GameScene extends Phaser.Scene {
       this.scene.start("EditorScene"); // テストプレイ終了 → エディタへ戻る（GDD §12.7）
       return true;
     }
+    // タイムアタックは1面ごとの遊びなので、勝っても負けても選択画面へ戻す（GDD §8.7）
+    if (this.mode === "timeAttack") {
+      this.scene.start("MissionSelectScene");
+      return true;
+    }
     if (status === "allclear") {
       this.scene.start("TitleScene");
       return true;
     }
+    // サバイバルは残機1なのでやり直し＝シャッフルからやり直す（同じ並びを覚えて攻略させない）
+    if (this.mode === "survival") {
+      this.scene.start("GameScene", { mode: "survival", playerCount: this.playerCount });
+      return true;
+    }
     this.restartRun(); // ゲームオーバー → M1 から再スタート
     return true;
+  }
+
+  /** このランで新たに解除した実績の告知（無ければ空文字。GDD §8.7） */
+  private unlockedText(): string {
+    if (this.unlockedFx.length === 0) return "";
+    return `実績解除！ ${this.unlockedFx.map((a) => `★${a.name}`).join("　")}\n\n`;
+  }
+
+  /** サバイバルの成績（クリア数と自己ベスト。GDD §8.7） */
+  private survivalResultText(): string {
+    const cleared = this.world.clearedTimes.filter((t) => t !== undefined).length;
+    const best = this.records.survivalBest();
+    return `${cleared} 面クリア／自己ベスト ${best} 面`;
   }
 
   /** ランを最初からやり直す（ポーズ・NEW 表示・クリア演出もリセット） */
@@ -871,7 +953,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     // HUD（ミッション番号・難易度・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§8.3・§12.5）
-    let left = `MISSION ${world.missionIndex + 1}/${world.missions.length}　[${DIFFICULTY_LABELS[this.difficulty]}]　残機: ${world.lives}`;
+    // モード名はキャンペーン以外のときだけ出す（従来の表示を変えないため。GDD §8.7）
+    const modeTag = this.mode === "campaign" || this.customPlay ? "" : `[${MODE_LABELS[this.mode]}]　`;
+    const missionLabel =
+      this.mode === "timeAttack"
+        ? `MISSION ${this.timeAttackMission}`
+        : `MISSION ${world.missionIndex + 1}/${world.missions.length}`;
+    // 残機はキャンペーンのときだけ出す。タイムアタック・サバイバルは常に1機なので
+    // 表示しても情報が無く、モード名を足したぶん中央の TIME 表示に食い込んでしまう
+    const livesTag = this.mode === "campaign" ? `　残機: ${world.lives}` : "";
+    let left = `${modeTag}${missionLabel}　[${DIFFICULTY_LABELS[this.difficulty]}]${livesTag}`;
     if (this.playerCount === 2) {
       // 中央のタイム表示と重ならないよう短い記号で示す（◆=生存 ✕=退場）
       const stateOf = (i: number): string => (world.players[i]?.alive ? "◆" : "✕");
@@ -907,14 +998,28 @@ export class GameScene extends Phaser.Scene {
       title = "GAME OVER";
       sub = this.customPlay
         ? "R またはクリックでエディタへ戻る"
-        : "R またはクリックで M1 から再スタート";
+        : this.mode === "timeAttack"
+          ? `${this.unlockedText()}R またはクリックでミッション選択へ`
+          : this.mode === "survival"
+            ? `${this.survivalResultText()}\n\n${this.unlockedText()}R またはクリックでもう一度（並びはシャッフルし直す）`
+            : "R またはクリックで M1 から再スタート";
     } else if (world.status === "allclear") {
-      title = this.customPlay ? "CLEAR!" : "ALL CLEAR!";
-      sub = this.customPlay
-        ? `${this.allClearText}\n\nR またはクリックでエディタへ戻る`
-        : `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
-          `${this.allClearText}\n\n` +
-          "R またはクリックでタイトルへ";
+      if (this.mode === "timeAttack") {
+        title = "CLEAR!";
+        sub =
+          `M${this.timeAttackMission} タイム ${formatTime(world.lastClearTime ?? 0)}s\n\n` +
+          `${this.unlockedText()}R またはクリックでミッション選択へ`;
+      } else if (this.mode === "survival") {
+        title = "SURVIVED!";
+        sub = `${this.survivalResultText()}\n\n${this.unlockedText()}R またはクリックでタイトルへ`;
+      } else {
+        title = this.customPlay ? "CLEAR!" : "ALL CLEAR!";
+        sub = this.customPlay
+          ? `${this.allClearText}\n\nR またはクリックでエディタへ戻る`
+          : `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
+            `${this.allClearText}\n\n` +
+            `${this.unlockedText()}R またはクリックでタイトルへ`;
+      }
     }
     const showOverlay = title !== "";
     // オーバーレイの版組は3種類（GDD §8.5・§8 v0.17）：

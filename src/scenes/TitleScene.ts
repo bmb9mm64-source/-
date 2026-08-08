@@ -159,13 +159,48 @@ export class TitleScene extends Phaser.Scene {
     textButton(this, w / 2 - 130, h / 2 + 140, fmt(1, "1人で出撃"), buttonStyle, () => start(1));
     textButton(this, w / 2 + 130, h / 2 + 140, fmt(2, "2人で出撃"), buttonStyle, () => start(2));
 
+    // タイムアタック（ミッション選択）とサバイバルの入口（GDD §8.7 v0.23）。
+    // 到達済みが1面もない＝初回起動のときは出さない（まず本編を遊んでもらう）
+    const subStyle = {
+      ...textStyle,
+      fontSize: "15px",
+      backgroundColor: "#2b3040",
+      padding: { x: 12, y: 5 },
+    };
+    if (hasContinue) {
+      textButton(
+        this,
+        w / 2 - 150,
+        h / 2 + 208,
+        touchOnly ? "タイムアタック" : "[4] タイムアタック",
+        subStyle,
+        () => this.scene.start("MissionSelectScene"),
+      );
+      textButton(
+        this,
+        w / 2 + 10,
+        h / 2 + 208,
+        touchOnly ? "サバイバル" : "[5] サバイバル",
+        subStyle,
+        () => {
+          SFX.unlock();
+          this.scene.start("GameScene", { mode: "survival", playerCount: 1 });
+        },
+      );
+      this.input.keyboard?.on("keydown-FOUR", () => this.scene.start("MissionSelectScene"));
+      this.input.keyboard?.on("keydown-FIVE", () => {
+        SFX.unlock();
+        this.scene.start("GameScene", { mode: "survival", playerCount: 1 });
+      });
+    }
+
     // ステージエディタへの入口（GDD §12.7）
     textButton(
       this,
-      w / 2,
+      hasContinue ? w / 2 + 150 : w / 2,
       h / 2 + 208,
-      touchOnly ? "ステージエディタ" : "[E] ステージエディタ",
-      { ...textStyle, fontSize: "15px", backgroundColor: "#2b3040", padding: { x: 12, y: 5 } },
+      touchOnly ? "エディタ" : "[E] エディタ",
+      subStyle,
       () => this.scene.start("EditorScene"),
     );
 
@@ -177,7 +212,7 @@ export class TitleScene extends Phaser.Scene {
     // 実際に押せるキーだけを案内する（「続きから」が無いときに 3 を案内しない。v0.17）
     const keyHint = touchOnly
       ? "ボタンをタップして選択"
-      : `クリックまたは ${hasContinue ? "1 / 2 / 3 / E" : "1 / 2 / E"} キーで選択`;
+      : `クリックまたは ${hasContinue ? "1 / 2 / 3 / 4 / 5 / E" : "1 / 2 / E"} キーで選択`;
     const prompt = this.add
       .text(w / 2, h / 2 + 236, keyHint, {
         ...textStyle,
