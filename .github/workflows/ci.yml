@@ -3,9 +3,11 @@
 # ここが緑であることがステージデータの健全性の担保でもある。
 name: CI
 
+# push と pull_request の両方を全ブランチ対象にすると、PR のあるブランチで2回走って無駄なので
+# push は既定ブランチだけにし、作業ブランチは pull_request 側で見る。
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 # 同じブランチに連続で push したときは古い実行を打ち切る（待ち時間と実行枠の節約）
