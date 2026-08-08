@@ -14,6 +14,7 @@
  *   "roll"   … 直接射線が塞がれているとき、AIM 突入ごとに1回だけ抽選（確率は難易度連動）。敵A・C
  *   "always" … 抽選なしで常に反射点を狙う（100%）。敵E・G
  */
+import { BALANCE } from "../config/balance";
 import type { Bullet, BulletSpawnConfig } from "./bullet";
 import { liveBulletCount, scaleBulletSpeed, spawnBullet } from "./bullet";
 import { type DifficultyMods, NORMAL_MODS } from "./difficulty";
@@ -24,7 +25,7 @@ import {
   rollFireInterval,
 } from "./enemyAi";
 import { angleDiff, type Rng, rotateToward } from "./mathUtils";
-import { findOuterWallRicochet } from "./ricochetAim";
+import { findOuterWallRicochet, type RicochetShot } from "./ricochetAim";
 import type { ParsedStage } from "./stage";
 import { selectTarget, type TargetInfo } from "./targeting";
 import type { TankBody } from "./types";
@@ -43,6 +44,11 @@ export interface TurretTank extends TankBody {
   jitterTimer: number; // ブレ引き直しまでの残り時間 [s]
   ricochetRolled: boolean; // この AIM サイクルで跳弾狙撃の抽選を消化したか（"roll" のみ使用）
   ricochetMode: boolean; // 抽選に当たり跳弾狙撃を試みているか（"roll" のみ使用）
+  /** 直近に求めた反射点（GDD §6 v0.23。毎フレームではなく一定間隔で計算し直して使い回す） */
+  ricochetShot: RicochetShot | null;
+  ricochetRecalcTimer: number; // 次に計算し直すまでの残り時間 [s]
+  ricochetAimX: number; // 計算に使った標的の位置（大きく動いたら間隔を待たず引き直す）
+  ricochetAimY: number;
 }
 
 /**
@@ -92,10 +98,10 @@ export function updateTurretAi(
     e.ricochetMode = !direct && ctx.rng() < mods.turretRicochetChance; // 難易度連動（GDD §6 v0.9）
   }
 
-  // --- 狙いの決定：直接射線があれば標的、なければ跳弾の反射点（毎フレーム再計算） ---
+  // --- 狙いの決定：直接射線があれば標的、なければ跳弾の反射点 ---
   const tryRicochet =
     policy === "always" ? !direct : e.state === "AIM" && !direct && e.ricochetMode;
-  const shot = tryRicochet ? findOuterWallRicochet(ctx.stage, e.x, e.y, p.x, p.y) : null;
+  const shot = tryRicochet ? refreshRicochet(e, dt, ctx.stage, p) : clearRicochet(e);
   const aimTarget = shot ? shot.aimAngle : Math.atan2(p.y - e.y, p.x - e.x);
   e.turretAngle = rotateToward(e.turretAngle, aimTarget + e.jitter, cfg.TURN_SPEED * dt);
 
@@ -139,6 +145,37 @@ export function updateTurretAi(
   }
 }
 
+/**
+ * 反射点を求め直す（GDD §6 v0.23）。反射点の探索は最大4候補×2本の射線判定と重いので、
+ * 毎フレームではなく RICOCHET_RECALC_INTERVAL ごとに計算し、間は前回の結果を使い回す。
+ * 標的が RICOCHET_RETARGET_DIST 以上動いた（＝別のプレイヤーに切り替わった等）ときは
+ * 間隔を待たずに引き直す。
+ */
+function refreshRicochet(
+  e: TurretTank,
+  dt: number,
+  stage: ParsedStage,
+  p: TargetInfo,
+): RicochetShot | null {
+  const t = BALANCE.TURRET;
+  e.ricochetRecalcTimer -= dt;
+  const moved = Math.hypot(p.x - e.ricochetAimX, p.y - e.ricochetAimY);
+  if (e.ricochetRecalcTimer <= 0 || moved >= t.RICOCHET_RETARGET_DIST) {
+    e.ricochetShot = findOuterWallRicochet(stage, e.x, e.y, p.x, p.y);
+    e.ricochetRecalcTimer = t.RICOCHET_RECALC_INTERVAL;
+    e.ricochetAimX = p.x;
+    e.ricochetAimY = p.y;
+  }
+  return e.ricochetShot;
+}
+
+/** 跳弾狙撃をやめたときに使い回しの結果を捨てる（次に必要になったら即座に計算し直す） */
+function clearRicochet(e: TurretTank): null {
+  e.ricochetShot = null;
+  e.ricochetRecalcTimer = 0;
+  return null;
+}
+
 /** 固定砲台の共通初期状態（create* から使う。ブレなしの敵も jitter は 0 で持つ） */
 export function createTurretState(fireTimer: number): Omit<TurretTank, keyof TankBody> {
   return {
@@ -148,5 +185,9 @@ export function createTurretState(fireTimer: number): Omit<TurretTank, keyof Tan
     jitterTimer: 0,
     ricochetRolled: false,
     ricochetMode: false,
+    ricochetShot: null,
+    ricochetRecalcTimer: 0,
+    ricochetAimX: Number.NaN, // 初回は必ず計算する（NaN との比較で moved は NaN → 条件は timer 側で成立）
+    ricochetAimY: Number.NaN,
   };
 }
