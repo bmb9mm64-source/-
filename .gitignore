@@ -1,0 +1,4 @@
+# 依存パッケージ（npm install で再生成可能）
+node_modules/
+# ビルド成果物
+dist/

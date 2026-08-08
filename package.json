@@ -1,0 +1,22 @@
+{
+  "name": "hanedan",
+  "private": true,
+  "version": "0.2.0",
+  "description": "ハネダン！— 跳弾で敵戦車を撃ち抜くトップダウン戦車アクション",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.0"
+  }
+}

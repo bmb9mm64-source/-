@@ -1,0 +1,39 @@
+# 型チェック・テスト・ビルドを自動で回す（GDD の機械検証を壊したまま進めないための安全網）。
+# tests/missions.test.ts は全50ミッションの成立条件（射線・跳弾・到達範囲）まで検証しているので、
+# ここが緑であることがステージデータの健全性の担保でもある。
+name: CI
+
+# push と pull_request の両方を全ブランチ対象にすると、PR のあるブランチで2回走って無駄なので
+# push は既定ブランチだけにし、作業ブランチは pull_request 側で見る。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じブランチに連続で push したときは古い実行を打ち切る（待ち時間と実行枠の節約）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # lockfile どおりに入れる（CI で依存が勝手に上がってテスト結果が変わらないように）
+      - run: npm ci
+
+      - name: 型チェック（tsc --noEmit）
+        run: npm run typecheck
+
+      - name: 単体テスト（Vitest。全50ミッションの機械検証を含む）
+        run: npm test
+
+      - name: 本番ビルド
+        run: npm run build
