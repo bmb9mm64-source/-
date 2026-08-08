@@ -48,27 +48,13 @@
   /* 操作説明はゲーム画面（Phaser）側が場面に応じて出す。ここに固定文を置くと
      エディタ画面では誤情報になり、狭いウィンドウでは盤面を画面外へ押し出してしまう。
      案内は position: fixed にしてレイアウトの高さを奪わせない。 */
-  .hint {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 6px;
-    font-size: 13px;
-    letter-spacing: 0.05em;
-    text-align: center;
-    padding: 0 12px;
-    pointer-events: none;
-  }
-  /* 盤面は横長（25×17タイル）なので、縦持ちだと大半が余白になる。縦持ちのときだけ案内する。 */
-  #rotate-hint { display: none; }
-  @media (hover: none) and (orientation: portrait) {
-    #rotate-hint { display: block; }
-  }
+  /* 縦持ちには専用レイアウト（盤面の下に操作帯）ができたので、
+     「横向きにしてください」の案内は撤去した（GDD §3.6 v0.23）。
+     画面に固定表示すると盤面や操作帯に重なってしまうという実害もあった。 */
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div class="hint" id="rotate-hint">📱 横向きにすると画面が大きくなります</div>
 <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

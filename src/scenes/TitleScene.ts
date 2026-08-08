@@ -16,6 +16,7 @@ import {
 } from "../core/difficulty";
 import { formatTime, Records, type RecordStore, safeLocalStorageStore } from "../core/records";
 import { applyRenderScale, TEXT_RESOLUTION } from "./renderScale";
+import { drawFloorGrid, textButton } from "./sceneUi";
 import { bindSceneAudio } from "./sceneAudio";
 
 export class TitleScene extends Phaser.Scene {
@@ -29,22 +30,13 @@ export class TitleScene extends Phaser.Scene {
   }
 
   create(): void {
-    applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
+    applyRenderScale(this, { centerBoard: true }); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
     const w = BALANCE.TILE * BALANCE.COLS;
     const h = BALANCE.TILE * BALANCE.ROWS;
     this.input.setDefaultCursor("default"); // タイトルでは OS カーソルを表示
 
-    // 背景（床色＋薄いグリッドで盤面の雰囲気を出す）
-    const bg = this.add.graphics();
-    bg.fillStyle(COLORS.FLOOR, 1);
-    bg.fillRect(0, 0, w, h);
-    bg.lineStyle(1, COLORS.FLOOR_GRID, 1);
-    for (let c = 1; c < BALANCE.COLS; c++) {
-      bg.lineBetween(c * BALANCE.TILE + 0.5, 0, c * BALANCE.TILE + 0.5, h);
-    }
-    for (let r = 1; r < BALANCE.ROWS; r++) {
-      bg.lineBetween(0, r * BALANCE.TILE + 0.5, w, r * BALANCE.TILE + 0.5);
-    }
+    // 背景（床色＋薄いグリッドで盤面の雰囲気を出す。ゲーム画面と同じ絵になるよう共通部品を使う）
+    drawFloorGrid(this.add.graphics());
 
     // 装飾：1P（青）と2P（緑）の戦車風シンボルを並べる（矩形＋円のコード描画）
     const deco = this.add.graphics();
@@ -109,19 +101,17 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.diffButtons.clear();
     DIFFICULTIES.forEach((d, i) => {
-      const btn = this.add
-        .text(w / 2 - 110 + i * 110, h / 2 + 100, DIFFICULTY_LABELS[d], {
-          ...textStyle,
-          fontSize: "15px",
-          fontStyle: "bold",
-          padding: { x: 12, y: 5 },
-        })
-        .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true })
-        .on("pointerdown", () => {
+      const btn = textButton(
+        this,
+        w / 2 - 110 + i * 110,
+        h / 2 + 100,
+        DIFFICULTY_LABELS[d],
+        { ...textStyle, fontSize: "15px", fontStyle: "bold", padding: { x: 12, y: 5 } },
+        () => {
           SFX.unlock();
           this.selectDifficulty(d);
-        });
+        },
+      );
       this.diffButtons.set(d, btn);
     });
 
@@ -148,16 +138,14 @@ export class TitleScene extends Phaser.Scene {
     const reached = new Records(this.store, this.difficulty).reachedBest();
     const hasContinue = reached > 1;
     if (hasContinue) {
-      this.add
-        .text(w / 2, h / 2 + 178, `${touchOnly ? "" : "[3] "}続きから（M${reached}）`, {
-          ...textStyle,
-          fontSize: "16px",
-          backgroundColor: "#2b3040",
-          padding: { x: 12, y: 5 },
-        })
-        .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true })
-        .on("pointerdown", () => start(1, reached));
+      textButton(
+        this,
+        w / 2,
+        h / 2 + 178,
+        `${touchOnly ? "" : "[3] "}続きから（M${reached}）`,
+        { ...textStyle, fontSize: "16px", backgroundColor: "#2b3040", padding: { x: 12, y: 5 } },
+        () => start(1, reached),
+      );
       this.input.keyboard?.on("keydown-THREE", () => start(1, reached));
     }
     const buttonStyle = {
@@ -167,28 +155,86 @@ export class TitleScene extends Phaser.Scene {
       backgroundColor: "#343b4d",
       padding: { x: 18, y: 8 },
     };
-    this.add
-      .text(w / 2 - 130, h / 2 + 140, touchOnly ? "1人で出撃" : "[1] 1人で出撃", buttonStyle)
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => start(1));
-    this.add
-      .text(w / 2 + 130, h / 2 + 140, touchOnly ? "2人で出撃" : "[2] 2人で出撃", buttonStyle)
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => start(2));
+    const fmt = (n: number, label: string): string => (touchOnly ? label : `[${n}] ${label}`);
+    textButton(this, w / 2 - 130, h / 2 + 140, fmt(1, "1人で出撃"), buttonStyle, () => start(1));
+    textButton(this, w / 2 + 130, h / 2 + 140, fmt(2, "2人で出撃"), buttonStyle, () => start(2));
+
+    // タイムアタック（ミッション選択）とサバイバルの入口（GDD §8.7 v0.23）。
+    // 到達済みが1面もない＝初回起動のときは出さない（まず本編を遊んでもらう）
+    const subStyle = {
+      ...textStyle,
+      fontSize: "15px",
+      backgroundColor: "#2b3040",
+      padding: { x: 12, y: 5 },
+    };
+    if (hasContinue) {
+      textButton(
+        this,
+        w / 2 - 150,
+        h / 2 + 208,
+        touchOnly ? "タイムアタック" : "[4] タイムアタック",
+        subStyle,
+        () => this.scene.start("MissionSelectScene"),
+      );
+      textButton(
+        this,
+        w / 2 + 10,
+        h / 2 + 208,
+        touchOnly ? "サバイバル" : "[5] サバイバル",
+        subStyle,
+        () => {
+          SFX.unlock();
+          this.scene.start("GameScene", { mode: "survival", playerCount: 1 });
+        },
+      );
+      this.input.keyboard?.on("keydown-FOUR", () => this.scene.start("MissionSelectScene"));
+      this.input.keyboard?.on("keydown-FIVE", () => {
+        SFX.unlock();
+        this.scene.start("GameScene", { mode: "survival", playerCount: 1 });
+      });
+    }
 
     // ステージエディタへの入口（GDD §12.7）
-    this.add
-      .text(w / 2, h / 2 + 208, touchOnly ? "ステージエディタ" : "[E] ステージエディタ", {
-        ...textStyle,
-        fontSize: "15px",
-        backgroundColor: "#2b3040",
-        padding: { x: 12, y: 5 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.scene.start("EditorScene"));
+    textButton(
+      this,
+      hasContinue ? w / 2 + 150 : w / 2 + 90,
+      h / 2 + 208,
+      touchOnly ? "エディタ" : "[E] エディタ",
+      subStyle,
+      () => this.scene.start("EditorScene"),
+    );
+
+    // 練習（チュートリアル）への入口（GDD §8.8）。
+    // まだ一度も遊んでいない人にこそ必要なので、「続きから」が無いときも必ず出す。
+    if (!hasContinue) {
+      textButton(
+        this,
+        w / 2 - 90,
+        h / 2 + 208,
+        touchOnly ? "はじめての方へ" : "[0] はじめての方へ",
+        { ...subStyle, backgroundColor: "#3a5a3f" },
+        () => {
+          SFX.unlock();
+          this.scene.start("GameScene", { mode: "tutorial", playerCount: 1 });
+        },
+      );
+    } else {
+      textButton(
+        this,
+        w / 2 - 300,
+        h / 2 + 208,
+        touchOnly ? "れんしゅう" : "[0] れんしゅう",
+        subStyle,
+        () => {
+          SFX.unlock();
+          this.scene.start("GameScene", { mode: "tutorial", playerCount: 1 });
+        },
+      );
+    }
+    this.input.keyboard?.on("keydown-ZERO", () => {
+      SFX.unlock();
+      this.scene.start("GameScene", { mode: "tutorial", playerCount: 1 });
+    });
 
     const kb = this.input.keyboard;
     kb?.on("keydown-ONE", () => start(1));
@@ -198,7 +244,7 @@ export class TitleScene extends Phaser.Scene {
     // 実際に押せるキーだけを案内する（「続きから」が無いときに 3 を案内しない。v0.17）
     const keyHint = touchOnly
       ? "ボタンをタップして選択"
-      : `クリックまたは ${hasContinue ? "1 / 2 / 3 / E" : "1 / 2 / E"} キーで選択`;
+      : `クリックまたは ${hasContinue ? "0 / 1 / 2 / 3 / 4 / 5 / E" : "0 / 1 / 2 / E"} キーで選択`;
     const prompt = this.add
       .text(w / 2, h / 2 + 236, keyHint, {
         ...textStyle,

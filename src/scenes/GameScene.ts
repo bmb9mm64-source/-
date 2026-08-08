@@ -16,14 +16,38 @@ import { BALANCE, COLORS } from "../config/balance";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
 import { type Bullet, liveBulletCount } from "../core/bullet";
 import { ENEMY_DEFS } from "../core/enemyRegistry";
+import {
+  ammoPips,
+  chooseOverlayLayout,
+  type ClearRow,
+  formatClearRows,
+  formatTotalRow,
+  type OverlayLayout,
+} from "../core/hudText";
 import { eightWayAngle, type PlayerInput } from "../core/input";
 import { liveMineCount } from "../core/mine";
 import { missileShape, prismShape, sniperShape } from "../core/missileShape";
+import {
+  type AchievementDef,
+  AchievementStore,
+  buildRunSnapshot,
+} from "../core/achievements";
+import { type GameMode, MODE_LABELS, MODE_LIVES, shuffleMissions } from "../core/gameModes";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
-import { applyRenderScale, TEXT_RESOLUTION, toGameCoord } from "./renderScale";
+import {
+  applyRenderScale,
+  BOARD_H,
+  BOARD_W,
+  TEXT_RESOLUTION,
+  toGameCoord,
+  TOUCH_BAND_H,
+  VIEW_H,
+  VIEW_W,
+} from "./renderScale";
+import { drawFloorGrid } from "./sceneUi";
 import { bindSceneAudio } from "./sceneAudio";
 import {
   mineButtonRect,
@@ -33,6 +57,7 @@ import {
   type TouchResolved,
 } from "../core/touch";
 import { ALL_MISSIONS } from "../stages/allMissions";
+import { TUTORIAL_MISSIONS } from "../stages/tutorial";
 
 /** タイム表示用の等幅フォント（tabular＝桁幅が揃う描画にして桁ブレを防ぐ） */
 const MONO_FONT = '"Consolas", "Menlo", "Courier New", monospace';
@@ -54,9 +79,6 @@ function pauseHelp(): string {
         "WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃\n" +
         "スペース・右クリック: 地雷 ／ M: 消音 ／ B: BGM";
 }
-
-/** オーバーレイの版組（文の長さで置き方を変える。GDD §8・§8.5） */
-type OverlayLayout = "normal" | "paused" | "allclear";
 
 /** 爆発フラッシュ演出（見た目のみ。fromRadius→toRadius へ拡大しながらフェードアウト） */
 interface ExplosionFx {
@@ -109,6 +131,12 @@ export class GameScene extends Phaser.Scene {
   private newRecordMissions = new Set<number>(); // このランでベスト更新したミッション番号（1始まり。全クリア一覧の ★NEW! 表示用）
   private clearFx: ClearFx | null = null; // ミッションクリア演出（バナー中に CLEAR! を表示）
   private allClearText = ""; // 全クリア画面のタイム一覧（allClear イベント時に構築）
+  private mode: GameMode = "campaign"; // 遊び方（GDD §8.7 v0.23）
+  /** タイムアタックで遊んでいるミッション番号（1始まり）。記録の宛先に使う */
+  private timeAttackMission = 1;
+  private livesAtStart = 0; // ラン開始時の残機（実績「無傷の帰還」の判定用）
+  private achievements = new AchievementStore(safeLocalStorageStore());
+  private unlockedFx: AchievementDef[] = []; // このランで新たに解除した実績（終了画面で見せる）
 
   private keys!: {
     w: Phaser.Input.Keyboard.Key;
@@ -142,6 +170,7 @@ export class GameScene extends Phaser.Scene {
   private readonly pauseHelpText = pauseHelp(); // ポーズ中の操作一覧（入力環境で内容が変わる）
   private hudAmmo1!: Phaser.GameObjects.Text; // 1P の残弾・残地雷（GDD §8 v0.17）
   private hudAmmo2!: Phaser.GameObjects.Text; // 2P の残弾・残地雷（2人プレイ時のみ）
+  private hudHint!: Phaser.GameObjects.Text; // チュートリアルの一言（本編では常に空。GDD §8.8）
 
   constructor() {
     super({ key: "GameScene" });
@@ -153,27 +182,52 @@ export class GameScene extends Phaser.Scene {
       customStage?: string[];
       returnTo?: "editor";
       startMission?: number; // 「続きから」で開始するミッション番号（1始まり。GDD §8.6）
+      mode?: GameMode; // 遊び方（省略時はキャンペーン。GDD §8.7）
     } = {},
   ): void {
     applyRenderScale(this); // 高解像度 canvas を論理座標系へ戻す（GDD §9 v0.20）
-    const w = BALANCE.TILE * BALANCE.COLS;
-    const h = BALANCE.TILE * BALANCE.ROWS;
+    // シーンの部品はすべて盤面（800×544）の中に置く。
+    // 縦持ちで下に伸びる操作帯（GDD §3.6）に置くのは仮想コントロールだけ。
+    const w = BOARD_W;
+    const h = BOARD_H;
 
     this.playerCount = data.playerCount === 2 ? 2 : 1;
     // エディタからのテストプレイ（GDD §12.7）：カスタム1ミッション構成・ベスト記録は対象外
     this.customPlay = data.returnTo === "editor" && Array.isArray(data.customStage);
-    const missions = this.customPlay
-      ? [{ name: "カスタムステージ", grid: data.customStage! }]
-      : ALL_MISSIONS;
-    // 選択中の難易度でワールドを生成（エディタのテストプレイにも適用。GDD §8.3）
-    this.difficulty = loadDifficulty(safeLocalStorageStore());
-    this.world = new GameWorld(missions, Math.random, this.playerCount, this.difficulty);
+    this.mode = this.customPlay ? "campaign" : (data.mode ?? "campaign");
     // デバッグ・プレイテスト用：URL の ?m=N（1始まり）で任意ミッションから開始できる（本編のみ）
     const mParam = Number(new URLSearchParams(window.location.search).get("m"));
     const start = Number.isInteger(data.startMission) ? data.startMission! : mParam;
-    if (!this.customPlay && Number.isInteger(start) && start >= 1 && start <= ALL_MISSIONS.length) {
-      this.world.loadMission(start - 1);
+    const validStart =
+      Number.isInteger(start) && start >= 1 && start <= ALL_MISSIONS.length ? start : 0;
+    this.timeAttackMission = validStart || 1;
+    this.difficulty = loadDifficulty(safeLocalStorageStore());
+    // モードごとにミッションの並びを決める（GDD §8.7）
+    //   テストプレイ … エディタの1面だけ
+    //   タイムアタック … 選んだ1面だけ（記録の宛先は timeAttackMission）
+    //   サバイバル … 全50面をシャッフル
+    //   キャンペーン … 従来どおりの並び
+    const missions = this.customPlay
+      ? [{ name: "カスタムステージ", grid: data.customStage! }]
+      : this.mode === "tutorial"
+        ? TUTORIAL_MISSIONS
+        : this.mode === "timeAttack"
+          ? [ALL_MISSIONS[this.timeAttackMission - 1]!]
+          : this.mode === "survival"
+            ? shuffleMissions(ALL_MISSIONS, Math.random)
+            : ALL_MISSIONS;
+    this.world = new GameWorld(
+      missions,
+      Math.random,
+      this.playerCount,
+      this.difficulty,
+      MODE_LIVES[this.mode],
+    );
+    // キャンペーンだけは途中のミッションから始められる（他モードは並びを組み替え済み）
+    if (!this.customPlay && this.mode === "campaign" && validStart) {
+      this.world.loadMission(validStart - 1);
     }
+    this.livesAtStart = this.world.lives;
     this.paused = false;
     this.fireRequested = false;
     this.mineRequested = false;
@@ -194,12 +248,23 @@ export class GameScene extends Phaser.Scene {
     this.particles = [];
     this.lastStageVersion = -1;
     this.records = new Records(safeLocalStorageStore(), this.difficulty); // ベスト記録は難易度別（GDD §8.3）
+    this.achievements = new AchievementStore(safeLocalStorageStore());
+    this.unlockedFx = [];
     this.newRecordMissions = new Set();
     this.clearFx = null;
     this.allClearText = "";
 
     this.input.setDefaultCursor("none"); // 自前の十字カーソルを描くため OS カーソルは隠す
     this.input.mouse?.disableContextMenu(); // 右クリック＝地雷設置のためコンテキストメニューを抑止
+
+    // --- 縦持ちの操作帯の下地（GDD §3.6）。盤面と地続きに見えないよう暗く沈める ---
+    if (TOUCH_BAND_H > 0) {
+      const band = this.add.graphics().setDepth(0);
+      band.fillStyle(COLORS.OVERLAY, 0.55);
+      band.fillRect(0, BOARD_H, VIEW_W, TOUCH_BAND_H);
+      band.lineStyle(2, COLORS.FLOOR_GRID, 1);
+      band.lineBetween(0, BOARD_H + 1, VIEW_W, BOARD_H + 1);
+    }
 
     // --- 盤面レイヤー（版が変わった時のみ描き直す） ---
     this.stageGfx = this.add.graphics().setDepth(0);
@@ -231,11 +296,23 @@ export class GameScene extends Phaser.Scene {
       .text(w - 10, h - 16, "", { ...ammoStyle, color: COLORS.P2_CSS })
       .setOrigin(1, 0.5)
       .setDepth(5);
+    // チュートリアルの一言（GDD §8.8）。盤面の上端に薄く重ね、プレイの邪魔をしない位置に置く。
+    // 本編のミッションは hint を持たないので、通常プレイでは常に空＝画面は従来どおり
+    this.hudHint = this.add
+      .text(w / 2, 48, "", {
+        ...hudStyle,
+        fontSize: "15px",
+        color: COLORS.RECORD_CSS,
+        backgroundColor: "#11141ce6",
+        padding: { x: 10, y: 5 },
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(5);
 
     // --- オーバーレイ（バナー・ポーズ・ゲームオーバー・全クリア） ---
     this.overlayGfx = this.add.graphics().setDepth(10).setVisible(false);
     this.overlayGfx.fillStyle(COLORS.OVERLAY, COLORS.OVERLAY_ALPHA);
-    this.overlayGfx.fillRect(0, 0, w, h);
+    this.overlayGfx.fillRect(0, 0, VIEW_W, VIEW_H);
     this.overlayTitle = this.add
       .text(w / 2, h / 2 - 18, "", {
         fontFamily: "sans-serif",
@@ -363,9 +440,8 @@ export class GameScene extends Phaser.Scene {
       });
     }
     if (!this.touchMode) return null;
-    const w = BALANCE.TILE * BALANCE.COLS;
-    const h = BALANCE.TILE * BALANCE.ROWS;
-    this.lastTouch = this.touch.resolve(points, w, h);
+    // 縦持ちでは盤面の下の操作帯まで含めた canvas 全体をタッチ領域として使う（GDD §3.6）
+    this.lastTouch = this.touch.resolve(points, VIEW_W, VIEW_H);
     return this.lastTouch;
   }
 
@@ -375,11 +451,9 @@ export class GameScene extends Phaser.Scene {
     g.clear();
     if (!this.touchMode) return;
     const c = BALANCE.TOUCH;
-    const w = BALANCE.TILE * BALANCE.COLS;
-    const h = BALANCE.TILE * BALANCE.ROWS;
-
-    // 地雷・ポーズボタン（常時表示。押しやすさのため大きめ）
-    const mine = mineButtonRect(w, h);
+    // ボタンの位置はタッチ判定（resolve）と同じ canvas 全体を基準にする。
+    // 縦持ちでは地雷ボタンが操作帯の右下に降りる（GDD §3.6）
+    const mine = mineButtonRect(VIEW_W, VIEW_H);
     g.fillStyle(COLORS.MINE, c.UI_ALPHA);
     g.fillRoundedRect(mine.x, mine.y, mine.w, mine.h, 12);
     g.lineStyle(2, COLORS.MINE_LAMP, c.UI_ALPHA + 0.25);
@@ -387,7 +461,7 @@ export class GameScene extends Phaser.Scene {
     g.fillStyle(COLORS.MINE_LAMP, c.UI_ALPHA + 0.3);
     g.fillCircle(mine.x + mine.w / 2, mine.y + mine.h / 2, 13);
 
-    const pause = pauseButtonRect(w, h);
+    const pause = pauseButtonRect(VIEW_W, VIEW_H);
     g.fillStyle(COLORS.WALL, c.UI_ALPHA);
     g.fillRoundedRect(pause.x, pause.y, pause.w, pause.h, 8);
     g.fillStyle(COLORS.CROSSHAIR, c.UI_ALPHA + 0.3);
@@ -464,7 +538,8 @@ export class GameScene extends Phaser.Scene {
       // ワールドの出来事を効果音・演出・記録更新に変換する
       for (const ev of this.world.events) {
         SFX.play(ev);
-        if (ev === "missionClear" || ev === "allClear") this.onMissionCleared(ev === "allClear");
+  if (ev === "missionClear" || ev === "allClear") this.onMissionCleared(ev === "allClear");
+        if (ev === "gameOver") this.finishRun(false);
       }
       // 戦車撃破：破片パーティクル＋小フラッシュ（GDD §8.5）
       for (const d of this.world.lastDestroyedTanks) this.spawnDestroyFx(d.x, d.y);
@@ -528,16 +603,49 @@ export class GameScene extends Phaser.Scene {
     const idx = this.world.lastClearIndex;
     const time = this.world.lastClearTime;
     if (idx === null || time === null) return;
-    // テストプレイはベスト記録の対象外（GDD §12.7）
-    const newRecord = this.customPlay ? false : this.records.submitMissionTime(idx + 1, time);
-    // 到達記録の更新（次のミッションから「続きから」始められるようにする。GDD §8.6）
-    if (!this.customPlay) this.records.submitReached(idx + 2);
-    if (newRecord) this.newRecordMissions.add(idx + 1);
+    // 記録の宛先はモードで変わる（GDD §8.7）。
+    //   キャンペーン … クリアした添字＝ミッション番号。到達記録も更新する
+    //   タイムアタック … 遊んでいる1面の番号。並びを組み替えているので添字は使えない
+    //   サバイバル … 面ごとのタイムは残さない（シャッフルされた並びの記録に意味がないため）
+    //   テストプレイ … 記録対象外（GDD §12.7）
+    const missionNumber =
+      this.mode === "timeAttack" ? this.timeAttackMission : idx + 1;
+    const keepsMissionTime =
+      !this.customPlay && this.mode !== "survival" && this.mode !== "tutorial";
+    const newRecord = keepsMissionTime ? this.records.submitMissionTime(missionNumber, time) : false;
+    if (!this.customPlay && this.mode === "campaign") this.records.submitReached(idx + 2);
+    if (newRecord) this.newRecordMissions.add(missionNumber);
     if (isAllClear) {
       this.buildAllClearText();
+      this.finishRun(true);
     } else {
       this.clearFx = { time, newRecord, timer: BALANCE.FX.CLEAR_BANNER_TIME };
     }
+  }
+
+  /**
+   * ランの終了（全クリア／ゲームオーバー）で記録と実績をまとめて提出する（GDD §8.7）。
+   * ここが実績の唯一の提出点＝「クリアの度に少しずつ解除される」ような散らばりを作らない。
+   */
+  private finishRun(allCleared: boolean): void {
+    // テストプレイ（§12.7）と練習（§8.8）は記録・実績とも対象外
+    if (this.customPlay || this.mode === "tutorial") return;
+    const snapshot = buildRunSnapshot(
+      this.mode,
+      this.difficulty,
+      this.playerCount,
+      allCleared,
+      {
+        clearedTimes: this.world.clearedTimes,
+        missionIndex: this.world.missionIndex,
+        lives: this.world.lives,
+        livesAtStart: this.livesAtStart,
+        lastClearTime: this.world.lastClearTime,
+        timeAttackMission: this.timeAttackMission,
+      },
+    );
+    if (this.mode === "survival") this.records.submitSurvival(snapshot.clearedCount);
+    this.unlockedFx = this.achievements.submit(snapshot);
   }
 
   /** 全クリア画面のタイム一覧（各ミッション・合計・ベスト比較）を構築する（GDD §8.5） */
@@ -549,27 +657,23 @@ export class GameScene extends Phaser.Scene {
       this.allClearText = t !== undefined ? `タイム ${formatTime(t)}s（記録対象外）` : "";
       return;
     }
-    const lines: string[] = [];
+    const rows: ClearRow[] = [];
     for (let i = 0; i < world.missions.length; i++) {
       const t = world.clearedTimes[i];
       if (t === undefined) continue; // 途中ミッション開始のデバッグランでは一部欠ける
-      const best = this.records.missionBest(i + 1);
-      const bestStr = best !== null ? formatTime(best).padStart(6, " ") : "  --.-";
-      const mark = this.newRecordMissions.has(i + 1) ? " ★NEW!" : "";
-      lines.push(
-        `M${String(i + 1).padEnd(2, " ")} ${formatTime(t).padStart(6, " ")}s / ベスト ${bestStr}s${mark}`,
-      );
+      rows.push({
+        missionNumber: i + 1,
+        time: t,
+        best: this.records.missionBest(i + 1),
+        isNewRecord: this.newRecordMissions.has(i + 1),
+      });
     }
+    const lines = formatClearRows(rows, formatTime);
     const total = world.totalTime;
     if (total !== null) {
       // 通しトータルベストは M1 から全ミッションを通したランのみ対象（GDD §8.5）
       const totalNewRecord = this.records.submitTotalTime(total);
-      const best = this.records.totalBest();
-      const bestStr = best !== null ? formatTime(best).padStart(6, " ") : "  --.-";
-      lines.push("");
-      lines.push(
-        `合計 ${formatTime(total).padStart(6, " ")}s / ベスト ${bestStr}s${totalNewRecord ? " ★NEW!" : ""}`,
-      );
+      lines.push("", formatTotalRow(total, this.records.totalBest(), totalNewRecord, formatTime));
     }
     this.allClearText = lines.join("\n");
   }
@@ -603,23 +707,11 @@ export class GameScene extends Phaser.Scene {
   /** 盤面（床・グリッド・壁・破壊可能壁・穴）の描画。X 破壊やミッション切替時に呼び直す */
   private drawStage(): void {
     const t = BALANCE.TILE;
-    const w = t * BALANCE.COLS;
-    const h = t * BALANCE.ROWS;
     const gfx = this.stageGfx;
     gfx.clear();
 
-    // 床
-    gfx.fillStyle(COLORS.FLOOR, 1);
-    gfx.fillRect(0, 0, w, h);
-
-    // 薄いグリッド線（盤面の視認性向上）
-    gfx.lineStyle(1, COLORS.FLOOR_GRID, 1);
-    for (let c = 1; c < BALANCE.COLS; c++) {
-      gfx.lineBetween(c * t + 0.5, 0, c * t + 0.5, h);
-    }
-    for (let r = 1; r < BALANCE.ROWS; r++) {
-      gfx.lineBetween(0, r * t + 0.5, w, r * t + 0.5);
-    }
+    // 床＋薄いグリッド線（タイトル画面と同じ絵。sceneUi の共通部品）
+    drawFloorGrid(gfx);
 
     // 壁・破壊可能壁・穴
     const stage = this.world.stage;
@@ -661,11 +753,9 @@ export class GameScene extends Phaser.Scene {
     if (!p) return "";
     const label = this.playerCount === 2 ? `P${index + 1} ` : "";
     if (!p.alive) return `${label}—`; // 退場中は残量を出さない
-    const pips = (used: number, max: number): string =>
-      "●".repeat(Math.max(0, max - used)) + "○".repeat(Math.min(used, max));
     const bullets = liveBulletCount(this.world.bullets, p);
     const mines = liveMineCount(this.world.mines, p);
-    return `${label}弾 ${pips(bullets, BALANCE.PLAYER.MAX_BULLETS)}　地雷 ${pips(mines, BALANCE.MINE.MAX_PER_OWNER)}`;
+    return `${label}弾 ${ammoPips(bullets, BALANCE.PLAYER.MAX_BULLETS)}　地雷 ${ammoPips(mines, BALANCE.MINE.MAX_PER_OWNER)}`;
   }
 
   /**
@@ -680,12 +770,40 @@ export class GameScene extends Phaser.Scene {
       this.scene.start("EditorScene"); // テストプレイ終了 → エディタへ戻る（GDD §12.7）
       return true;
     }
+    // 練習は勝っても負けてもタイトルへ（本編へ送り出す。GDD §8.8）
+    if (this.mode === "tutorial") {
+      this.scene.start("TitleScene");
+      return true;
+    }
+    // タイムアタックは1面ごとの遊びなので、勝っても負けても選択画面へ戻す（GDD §8.7）
+    if (this.mode === "timeAttack") {
+      this.scene.start("MissionSelectScene");
+      return true;
+    }
     if (status === "allclear") {
       this.scene.start("TitleScene");
       return true;
     }
+    // サバイバルは残機1なのでやり直し＝シャッフルからやり直す（同じ並びを覚えて攻略させない）
+    if (this.mode === "survival") {
+      this.scene.start("GameScene", { mode: "survival", playerCount: this.playerCount });
+      return true;
+    }
     this.restartRun(); // ゲームオーバー → M1 から再スタート
     return true;
+  }
+
+  /** このランで新たに解除した実績の告知（無ければ空文字。GDD §8.7） */
+  private unlockedText(): string {
+    if (this.unlockedFx.length === 0) return "";
+    return `実績解除！ ${this.unlockedFx.map((a) => `★${a.name}`).join("　")}\n\n`;
+  }
+
+  /** サバイバルの成績（クリア数と自己ベスト。GDD §8.7） */
+  private survivalResultText(): string {
+    const cleared = this.world.clearedTimes.filter((t) => t !== undefined).length;
+    const best = this.records.survivalBest();
+    return `${cleared} 面クリア／自己ベスト ${best} 面`;
   }
 
   /** ランを最初からやり直す（ポーズ・NEW 表示・クリア演出もリセット） */
@@ -882,7 +1000,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     // HUD（ミッション番号・難易度・残機・撃破数。2P 時は P1/P2 の生存状態も表示。GDD §8・§8.3・§12.5）
-    let left = `MISSION ${world.missionIndex + 1}/${world.missions.length}　[${DIFFICULTY_LABELS[this.difficulty]}]　残機: ${world.lives}`;
+    // モード名はキャンペーン以外のときだけ出す（従来の表示を変えないため。GDD §8.7）
+    const modeTag = this.mode === "campaign" || this.customPlay ? "" : `[${MODE_LABELS[this.mode]}]　`;
+    const missionLabel =
+      this.mode === "timeAttack"
+        ? `MISSION ${this.timeAttackMission}`
+        : `MISSION ${world.missionIndex + 1}/${world.missions.length}`;
+    // 残機はキャンペーンのときだけ出す。タイムアタック・サバイバルは常に1機なので
+    // 表示しても情報が無く、モード名を足したぶん中央の TIME 表示に食い込んでしまう
+    const livesTag = this.mode === "campaign" ? `　残機: ${world.lives}` : "";
+    let left = `${modeTag}${missionLabel}　[${DIFFICULTY_LABELS[this.difficulty]}]${livesTag}`;
     if (this.playerCount === 2) {
       // 中央のタイム表示と重ならないよう短い記号で示す（◆=生存 ✕=退場）
       const stateOf = (i: number): string => (world.players[i]?.alive ? "◆" : "✕");
@@ -895,6 +1022,8 @@ export class GameScene extends Phaser.Scene {
     // 残弾・残地雷（●＝撃てる／○＝場に出ていて撃てない。GDD §8 v0.17）
     this.hudAmmo1.setText(this.ammoText(0));
     this.hudAmmo2.setText(this.playerCount === 2 ? this.ammoText(1) : "");
+    // ミッションが hint を持つとき（＝チュートリアル）だけ一言を出す。GDD §8.8
+    this.hudHint.setText(world.missions[world.missionIndex]?.hint ?? "");
 
     // オーバーレイ
     const h = BALANCE.TILE * BALANCE.ROWS;
@@ -918,14 +1047,31 @@ export class GameScene extends Phaser.Scene {
       title = "GAME OVER";
       sub = this.customPlay
         ? "R またはクリックでエディタへ戻る"
-        : "R またはクリックで M1 から再スタート";
+        : this.mode === "timeAttack"
+          ? `${this.unlockedText()}R またはクリックでミッション選択へ`
+          : this.mode === "survival"
+            ? `${this.survivalResultText()}\n\n${this.unlockedText()}R またはクリックでもう一度（並びはシャッフルし直す）`
+            : "R またはクリックで M1 から再スタート";
     } else if (world.status === "allclear") {
-      title = this.customPlay ? "CLEAR!" : "ALL CLEAR!";
-      sub = this.customPlay
-        ? `${this.allClearText}\n\nR またはクリックでエディタへ戻る`
-        : `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
-          `${this.allClearText}\n\n` +
-          "R またはクリックでタイトルへ";
+      if (this.mode === "tutorial") {
+        title = "れんしゅう おわり";
+        sub = "これで基本はすべてです。\n\nR またはクリックでタイトルへ（本編へどうぞ）";
+      } else if (this.mode === "timeAttack") {
+        title = "CLEAR!";
+        sub =
+          `M${this.timeAttackMission} タイム ${formatTime(world.lastClearTime ?? 0)}s\n\n` +
+          `${this.unlockedText()}R またはクリックでミッション選択へ`;
+      } else if (this.mode === "survival") {
+        title = "SURVIVED!";
+        sub = `${this.survivalResultText()}\n\n${this.unlockedText()}R またはクリックでタイトルへ`;
+      } else {
+        title = this.customPlay ? "CLEAR!" : "ALL CLEAR!";
+        sub = this.customPlay
+          ? `${this.allClearText}\n\nR またはクリックでエディタへ戻る`
+          : `全ミッション制覇！ 撃破: ${world.kills}\n\n` +
+            `${this.allClearText}\n\n` +
+            `${this.unlockedText()}R またはクリックでタイトルへ`;
+      }
     }
     const showOverlay = title !== "";
     // オーバーレイの版組は3種類（GDD §8.5・§8 v0.17）：
@@ -934,11 +1080,7 @@ export class GameScene extends Phaser.Scene {
     //   normal   … 1行の短い文なので従来どおり中央寄せ
     // setFontSize/setLineSpacing/setColor は Phaser 側に「同じ値なら無視」の判定がなく、
     // 呼ぶたびに Text の再描画＋テクスチャ再アップロードが走るため、変わったフレームだけ適用する。
-    const layout: OverlayLayout = this.paused
-      ? "paused"
-      : world.status === "allclear"
-        ? "allclear"
-        : "normal";
+    const layout = chooseOverlayLayout(this.paused, world.status);
     if (layout !== this.overlayLayout) {
       this.overlayLayout = layout;
       if (layout === "allclear") {

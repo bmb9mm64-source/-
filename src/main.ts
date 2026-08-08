@@ -3,8 +3,10 @@
  */
 import Phaser from "phaser";
 import { COLORS } from "./config/balance";
+import { AchievementsScene } from "./scenes/AchievementsScene";
 import { EditorScene } from "./scenes/EditorScene";
 import { GameScene } from "./scenes/GameScene";
+import { MissionSelectScene } from "./scenes/MissionSelectScene";
 import { RENDER_SCALE, VIEW_H, VIEW_W } from "./scenes/renderScale";
 import { TitleScene } from "./scenes/TitleScene";
 
@@ -29,6 +31,6 @@ new Phaser.Game({
     // canvas が画面外へはみ出す。親（#app）は CSS で画面いっぱいにしてあるので不要。
     expandParent: false,
   },
-  scene: [TitleScene, GameScene, EditorScene],
+  scene: [TitleScene, GameScene, EditorScene, MissionSelectScene, AchievementsScene],
   // ゲームロジックは core 側でデルタタイム更新するため物理エンジンは使わない
 });

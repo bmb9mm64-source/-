@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { BALANCE } from "../src/config/balance";
 import { parseStage, solidForTank, stopsBullet, tileAt } from "../src/core/stage";
-import { STAGE_TEST } from "../src/stages/testStage";
+import { STAGE_TEST } from "./fixtures_testStage";
 
 describe("ステージパーサ", () => {
   const stage = parseStage(STAGE_TEST);

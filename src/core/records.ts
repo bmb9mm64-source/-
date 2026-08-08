@@ -27,6 +27,8 @@ export const RECORD_KEYS = {
   total: (difficulty: Difficulty): string => `hanedan.best.${difficulty}.total`,
   /** 到達済みの最高ミッション番号（GDD §8.6 v0.13：「続きから」用） */
   reached: (difficulty: Difficulty): string => `hanedan.reached.${difficulty}`,
+  /** サバイバルの最高クリア数（GDD §8.7 v0.23） */
+  survival: (difficulty: Difficulty): string => `hanedan.best.${difficulty}.survival`,
 } as const;
 
 /** メモリ実装（テスト・localStorage 不可時のフォールバック。保存はセッション限り） */
@@ -142,6 +144,24 @@ export class Records {
     if (n === null) return 1;
     const i = Math.floor(n);
     return i >= 1 ? i : 1;
+  }
+
+  /**
+   * サバイバルの最高クリア数（GDD §8.7）。記録なし・壊れた値は 0。
+   * タイムと違い「大きいほど良い」ので、提出の判定も向きが逆になる。
+   */
+  survivalBest(): number {
+    const n = parseStoredTime(this.store.get(RECORD_KEYS.survival(this.difficulty)));
+    return n === null ? 0 : Math.floor(n);
+  }
+
+  /** サバイバルのクリア数を提出し、記録更新なら保存して true を返す */
+  submitSurvival(clearedCount: number): boolean {
+    if (!Number.isFinite(clearedCount) || clearedCount < 0) return false;
+    const n = Math.floor(clearedCount);
+    if (n <= this.survivalBest()) return false;
+    this.store.set(RECORD_KEYS.survival(this.difficulty), String(n));
+    return true;
   }
 
   /** 到達したミッション番号を提出する（より奥に進んだときだけ更新） */

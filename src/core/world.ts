@@ -53,6 +53,11 @@ export type { EnemyTank }; // 敵戦車の型は enemyRegistry.ts が持つ（�
 export interface MissionDef {
   name: string;
   grid: readonly string[];
+  /**
+   * プレイ中に画面下へ出す一言（GDD §8.8。チュートリアルだけが持つ）。
+   * 本編のミッションは持たない＝通常プレイの画面は従来どおり何も増えない。
+   */
+  hint?: string;
 }
 
 /** 1フレーム中に起きた出来事（シーンが効果音・演出に使う） */
@@ -120,14 +125,22 @@ export class GameWorld {
   private readonly rng: Rng;
   private readonly mods: DifficultyMods; // 難易度の実効調整値（敵AIへ注入。GDD §8.3）
 
+  /**
+   * 残機の上書き（GDD §8.7 v0.23）。タイムアタック・サバイバルは難易度によらず1機にしたいので、
+   * モード側から指定できるようにする。null＝難易度どおり（従来の挙動）。
+   */
+  private readonly livesOverride: number | null;
+
   constructor(
     missions: readonly MissionDef[],
     rng: Rng = Math.random,
     playerCount = 1,
     difficulty: Difficulty = "normal",
+    livesOverride: number | null = null,
   ) {
     if (missions.length === 0) throw new Error("ミッションが1つもありません");
     this.missions = missions;
+    this.livesOverride = livesOverride;
     this.rng = rng;
     this.playerCount = Math.min(Math.max(1, Math.floor(playerCount)), BALANCE.GAME.MAX_PLAYERS);
     this.difficulty = difficulty;
@@ -172,7 +185,9 @@ export class GameWorld {
 
   /** ゲーム全体を最初からやり直す（Rキー・ゲームオーバー後の再開） */
   resetGame(): void {
-    this.lives = this.mods.lives; // 初期残機は難易度で決まる（EASY5／NORMAL3／HARD3。GDD §8.3）
+    // 初期残機は難易度で決まる（EASY5／NORMAL3／HARD3。GDD §8.3）。
+    // モードが指定していればそちらが優先（タイムアタック・サバイバルは1機固定。GDD §8.7）
+    this.lives = this.livesOverride ?? this.mods.lives;
     this.kills = 0;
     this.clearedTimes = []; // タイム記録もランごとにやり直し（GDD §8.5）
     this.lastClearIndex = null;
