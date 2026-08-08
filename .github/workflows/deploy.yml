@@ -1,0 +1,62 @@
+# 既定ブランチの内容を GitHub Pages へ公開する（Phase 9＝リリース）。
+# vite.config.ts の base は "./"（相対パス）なので、リポジトリ名を含むサブパスでも
+# アセットが解決できる。
+#
+# 初回だけリポジトリ側の設定が必要：
+#   Settings → Pages → Build and deployment → Source を「GitHub Actions」にする。
+#   これをしないと deploy ステップが「Pages が有効になっていない」で失敗する。
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 手動でも実行できるようにしておく
+
+# Pages への書き込みに必要な権限（既定は読み取りのみ）
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 公開は同時に1本だけ。実行中のものは走らせきる（途中で切ると中途半端な状態で公開されうる）
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 公開物が壊れていないことを確かめてから出す（CI と重複するが、
+      # 公開だけ手動実行された場合にも検証を通すため）
+      - name: 型チェック
+        run: npm run typecheck
+      - name: 単体テスト
+        run: npm test
+
+      - name: 本番ビルド
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
