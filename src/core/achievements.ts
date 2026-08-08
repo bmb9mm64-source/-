@@ -84,6 +84,51 @@ export function evaluateAchievements(run: RunSnapshot): string[] {
   return got;
 }
 
+/** ランの終了時にワールドから読み取る値（GameScene が渡す） */
+export interface RunEndState {
+  /** クリアしたミッションのタイム（未クリアは undefined。world.clearedTimes をそのまま渡す） */
+  clearedTimes: readonly (number | undefined)[];
+  /** 現在のミッションの添字（0始まり） */
+  missionIndex: number;
+  /** 残りの残機 */
+  lives: number;
+  /** ラン開始時の残機 */
+  livesAtStart: number;
+  /** 直近にクリアしたミッションのタイム [s] */
+  lastClearTime: number | null;
+  /** タイムアタックで遊んでいるミッション番号（1始まり） */
+  timeAttackMission: number;
+}
+
+/**
+ * ワールドの状態から実績判定用のランの結果を組み立てる（GDD §8.7・§14 の E7）。
+ *
+ * モードによって「到達ミッション」の意味が変わるのがややこしいところ。
+ *   campaign … 並びが本編どおりなので添字＋1がそのままミッション番号
+ *   それ以外 … 並びを組み替えている（タイムアタックは1面だけ、サバイバルはシャッフル）ので
+ *              添字は本編のミッション番号にならない。選んだ面の番号を使う
+ * 全クリアの実績もキャンペーンだけが対象（1面だけ遊んで「全50制覇」にはならない）。
+ */
+export function buildRunSnapshot(
+  mode: GameMode,
+  difficulty: Difficulty,
+  playerCount: number,
+  allCleared: boolean,
+  state: RunEndState,
+): RunSnapshot {
+  const clearedCount = state.clearedTimes.filter((t) => t !== undefined).length;
+  return {
+    mode,
+    difficulty,
+    playerCount,
+    clearedCount,
+    reachedMission: mode === "campaign" ? state.missionIndex + 1 : state.timeAttackMission,
+    allCleared: allCleared && mode === "campaign",
+    noMiss: state.lives >= state.livesAtStart,
+    lastClearTime: state.lastClearTime,
+  };
+}
+
 /** 実績の保存・読み出し（Records と同じ RecordStore を使う） */
 export class AchievementStore {
   private readonly store: { get(key: string): string | null; set(key: string, value: string): void };

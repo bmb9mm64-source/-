@@ -16,10 +16,22 @@ import { BALANCE, COLORS } from "../config/balance";
 import { type Difficulty, DIFFICULTY_LABELS, loadDifficulty } from "../core/difficulty";
 import { type Bullet, liveBulletCount } from "../core/bullet";
 import { ENEMY_DEFS } from "../core/enemyRegistry";
+import {
+  ammoPips,
+  chooseOverlayLayout,
+  type ClearRow,
+  formatClearRows,
+  formatTotalRow,
+  type OverlayLayout,
+} from "../core/hudText";
 import { eightWayAngle, type PlayerInput } from "../core/input";
 import { liveMineCount } from "../core/mine";
 import { missileShape, prismShape, sniperShape } from "../core/missileShape";
-import { AchievementStore, type AchievementDef } from "../core/achievements";
+import {
+  type AchievementDef,
+  AchievementStore,
+  buildRunSnapshot,
+} from "../core/achievements";
 import { type GameMode, MODE_LABELS, MODE_LIVES, shuffleMissions } from "../core/gameModes";
 import { formatTime, Records, safeLocalStorageStore } from "../core/records";
 import type { TankBody } from "../core/types";
@@ -67,9 +79,6 @@ function pauseHelp(): string {
         "WASD: 移動 ／ マウス: 照準 ／ 左クリック: 射撃\n" +
         "スペース・右クリック: 地雷 ／ M: 消音 ／ B: BGM";
 }
-
-/** オーバーレイの版組（文の長さで置き方を変える。GDD §8・§8.5） */
-type OverlayLayout = "normal" | "paused" | "allclear";
 
 /** 爆発フラッシュ演出（見た目のみ。fromRadius→toRadius へ拡大しながらフェードアウト） */
 interface ExplosionFx {
@@ -621,18 +630,22 @@ export class GameScene extends Phaser.Scene {
   private finishRun(allCleared: boolean): void {
     // テストプレイ（§12.7）と練習（§8.8）は記録・実績とも対象外
     if (this.customPlay || this.mode === "tutorial") return;
-    const cleared = this.world.clearedTimes.filter((t) => t !== undefined).length;
-    if (this.mode === "survival") this.records.submitSurvival(cleared);
-    this.unlockedFx = this.achievements.submit({
-      mode: this.mode,
-      difficulty: this.difficulty,
-      playerCount: this.playerCount,
-      clearedCount: cleared,
-      reachedMission: this.mode === "campaign" ? this.world.missionIndex + 1 : this.timeAttackMission,
-      allCleared: allCleared && this.mode === "campaign",
-      noMiss: this.world.lives >= this.livesAtStart,
-      lastClearTime: this.world.lastClearTime,
-    });
+    const snapshot = buildRunSnapshot(
+      this.mode,
+      this.difficulty,
+      this.playerCount,
+      allCleared,
+      {
+        clearedTimes: this.world.clearedTimes,
+        missionIndex: this.world.missionIndex,
+        lives: this.world.lives,
+        livesAtStart: this.livesAtStart,
+        lastClearTime: this.world.lastClearTime,
+        timeAttackMission: this.timeAttackMission,
+      },
+    );
+    if (this.mode === "survival") this.records.submitSurvival(snapshot.clearedCount);
+    this.unlockedFx = this.achievements.submit(snapshot);
   }
 
   /** 全クリア画面のタイム一覧（各ミッション・合計・ベスト比較）を構築する（GDD §8.5） */
@@ -644,27 +657,23 @@ export class GameScene extends Phaser.Scene {
       this.allClearText = t !== undefined ? `タイム ${formatTime(t)}s（記録対象外）` : "";
       return;
     }
-    const lines: string[] = [];
+    const rows: ClearRow[] = [];
     for (let i = 0; i < world.missions.length; i++) {
       const t = world.clearedTimes[i];
       if (t === undefined) continue; // 途中ミッション開始のデバッグランでは一部欠ける
-      const best = this.records.missionBest(i + 1);
-      const bestStr = best !== null ? formatTime(best).padStart(6, " ") : "  --.-";
-      const mark = this.newRecordMissions.has(i + 1) ? " ★NEW!" : "";
-      lines.push(
-        `M${String(i + 1).padEnd(2, " ")} ${formatTime(t).padStart(6, " ")}s / ベスト ${bestStr}s${mark}`,
-      );
+      rows.push({
+        missionNumber: i + 1,
+        time: t,
+        best: this.records.missionBest(i + 1),
+        isNewRecord: this.newRecordMissions.has(i + 1),
+      });
     }
+    const lines = formatClearRows(rows, formatTime);
     const total = world.totalTime;
     if (total !== null) {
       // 通しトータルベストは M1 から全ミッションを通したランのみ対象（GDD §8.5）
       const totalNewRecord = this.records.submitTotalTime(total);
-      const best = this.records.totalBest();
-      const bestStr = best !== null ? formatTime(best).padStart(6, " ") : "  --.-";
-      lines.push("");
-      lines.push(
-        `合計 ${formatTime(total).padStart(6, " ")}s / ベスト ${bestStr}s${totalNewRecord ? " ★NEW!" : ""}`,
-      );
+      lines.push("", formatTotalRow(total, this.records.totalBest(), totalNewRecord, formatTime));
     }
     this.allClearText = lines.join("\n");
   }
@@ -744,11 +753,9 @@ export class GameScene extends Phaser.Scene {
     if (!p) return "";
     const label = this.playerCount === 2 ? `P${index + 1} ` : "";
     if (!p.alive) return `${label}—`; // 退場中は残量を出さない
-    const pips = (used: number, max: number): string =>
-      "●".repeat(Math.max(0, max - used)) + "○".repeat(Math.min(used, max));
     const bullets = liveBulletCount(this.world.bullets, p);
     const mines = liveMineCount(this.world.mines, p);
-    return `${label}弾 ${pips(bullets, BALANCE.PLAYER.MAX_BULLETS)}　地雷 ${pips(mines, BALANCE.MINE.MAX_PER_OWNER)}`;
+    return `${label}弾 ${ammoPips(bullets, BALANCE.PLAYER.MAX_BULLETS)}　地雷 ${ammoPips(mines, BALANCE.MINE.MAX_PER_OWNER)}`;
   }
 
   /**
@@ -1073,11 +1080,7 @@ export class GameScene extends Phaser.Scene {
     //   normal   … 1行の短い文なので従来どおり中央寄せ
     // setFontSize/setLineSpacing/setColor は Phaser 側に「同じ値なら無視」の判定がなく、
     // 呼ぶたびに Text の再描画＋テクスチャ再アップロードが走るため、変わったフレームだけ適用する。
-    const layout: OverlayLayout = this.paused
-      ? "paused"
-      : world.status === "allclear"
-        ? "allclear"
-        : "normal";
+    const layout = chooseOverlayLayout(this.paused, world.status);
     if (layout !== this.overlayLayout) {
       this.overlayLayout = layout;
       if (layout === "allclear") {

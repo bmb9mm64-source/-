@@ -27,6 +27,7 @@ import {
 import type { EnemyChar } from "../core/enemyKinds";
 import { ENEMY_DEF_BY_CHAR } from "../core/enemyRegistry";
 import { safeLocalStorageStore } from "../core/records";
+import { packRowByWidth } from "../core/hudText";
 import { applyRenderScale, TEXT_RESOLUTION } from "./renderScale";
 import { drawFloorGrid, textButton } from "./sceneUi";
 import { bindSceneAudio } from "./sceneAudio";
@@ -173,12 +174,13 @@ export class EditorScene extends Phaser.Scene {
         .setOrigin(0, 0.5) // 実際の文字幅で左から並べるので原点は左端（位置は下で設定する）
         .setDepth(6),
     );
-    const totalW = made.reduce((sum, t) => sum + t.width, 0) + gap * (made.length - 1);
-    let bx = Math.max(gap, (w - totalW) / 2); // 収まりきらない場合も左端から詰めて全ボタンを残す
-    for (const t of made) {
-      t.setX(bx);
-      bx += t.width + gap;
-    }
+    // 並べ方（実際の文字幅で詰める）は core の純粋関数に置いてある（GDD §12.7 v0.17）
+    const xs = packRowByWidth(
+      made.map((t) => t.width),
+      w,
+      gap,
+    );
+    made.forEach((t, i) => t.setX(xs[i]!));
 
     // --- トースト（検証結果などの一時表示） ---
     this.toast = this.add

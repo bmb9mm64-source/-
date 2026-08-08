@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   ACHIEVEMENTS,
   AchievementStore,
+  buildRunSnapshot,
   evaluateAchievements,
   QUICK_DRAW_SECONDS,
   type RunSnapshot,
@@ -220,5 +221,57 @@ describe("サバイバルの記録（大きいほど良い）", () => {
     new Records(store, "easy").submitSurvival(9);
     expect(new Records(store, "hard").survivalBest()).toBe(0);
     expect(new Records(store, "easy").survivalBest()).toBe(9);
+  });
+});
+
+describe("ランの結果の組み立て（buildRunSnapshot・GDD §14 の E7）", () => {
+  const base = {
+    clearedTimes: [1.5, 2.5, undefined, 4.0] as (number | undefined)[],
+    missionIndex: 3,
+    lives: 2,
+    livesAtStart: 3,
+    lastClearTime: 4.0,
+    timeAttackMission: 12,
+  };
+
+  it("クリア数は「タイムが入っている数」（途中の欠けを数えない）", () => {
+    const snap = buildRunSnapshot("campaign", "normal", 1, false, base);
+    expect(snap.clearedCount).toBe(3);
+  });
+
+  it("キャンペーンの到達ミッションは添字＋1", () => {
+    expect(buildRunSnapshot("campaign", "normal", 1, false, base).reachedMission).toBe(4);
+  });
+
+  it("キャンペーン以外は選んだ面の番号を使う（並びを組み替えているため）", () => {
+    for (const mode of ["timeAttack", "survival", "tutorial"] as const) {
+      expect(buildRunSnapshot(mode, "normal", 1, false, base).reachedMission, mode).toBe(12);
+    }
+  });
+
+  it("全クリアの扱いはキャンペーンだけ（1面だけ遊んで全制覇にはしない）", () => {
+    expect(buildRunSnapshot("campaign", "normal", 1, true, base).allCleared).toBe(true);
+    expect(buildRunSnapshot("timeAttack", "normal", 1, true, base).allCleared).toBe(false);
+    expect(buildRunSnapshot("survival", "normal", 1, true, base).allCleared).toBe(false);
+  });
+
+  it("無被弾は「残機が減っていないこと」", () => {
+    expect(buildRunSnapshot("campaign", "normal", 1, false, base).noMiss).toBe(false);
+    const intact = { ...base, lives: 3 };
+    expect(buildRunSnapshot("campaign", "normal", 1, false, intact).noMiss).toBe(true);
+  });
+
+  it("難易度・人数・直近タイムはそのまま引き継ぐ", () => {
+    const snap = buildRunSnapshot("campaign", "hard", 2, false, base);
+    expect(snap.difficulty).toBe("hard");
+    expect(snap.playerCount).toBe(2);
+    expect(snap.lastClearTime).toBe(4.0);
+  });
+
+  it("1つもクリアしていないランは clearedCount 0 で実績も出ない", () => {
+    const none = { ...base, clearedTimes: [undefined, undefined], missionIndex: 0 };
+    const snap = buildRunSnapshot("campaign", "normal", 1, false, none);
+    expect(snap.clearedCount).toBe(0);
+    expect(evaluateAchievements(snap)).toEqual([]);
   });
 });
