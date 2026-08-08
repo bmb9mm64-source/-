@@ -28,6 +28,7 @@ import type { EnemyChar } from "../core/enemyKinds";
 import { ENEMY_DEF_BY_CHAR } from "../core/enemyRegistry";
 import { safeLocalStorageStore } from "../core/records";
 import { applyRenderScale, TEXT_RESOLUTION } from "./renderScale";
+import { drawFloorGrid, textButton } from "./sceneUi";
 import { bindSceneAudio } from "./sceneAudio";
 
 /** 非敵タイルの表示ラベル（敵は記号から「敵A」…を機械的に作る） */
@@ -156,19 +157,22 @@ export class EditorScene extends Phaser.Scene {
     // ボタンは等分割ではなく**実際の文字幅**で並べる。
     // 等分割だと長いラベルが枠からはみ出して端のボタンが画面外に切れる（v0.17 で発生）。
     const gap = 4;
-    const made = buttons.map(([label, onClick]) => {
-      const t = this.add
-        .text(0, h - 16, label, { ...barStyle, backgroundColor: "#343b4d", padding: { x: 6, y: 4 } })
-        .setOrigin(0, 0.5)
-        .setDepth(6)
-        .setInteractive({ useHandCursor: true })
-        .on("pointerdown", (p: Phaser.Input.Pointer) => {
+    const made = buttons.map(([label, onClick]) =>
+      textButton(
+        this,
+        0,
+        h - 16,
+        label,
+        { ...barStyle, backgroundColor: "#343b4d", padding: { x: 6, y: 4 } },
+        (p) => {
           p.event.stopPropagation(); // 盤面塗りに伝播させない
           SFX.unlock();
           onClick();
-        });
-      return t;
-    });
+        },
+      )
+        .setOrigin(0, 0.5) // 実際の文字幅で左から並べるので原点は左端（位置は下で設定する）
+        .setDepth(6),
+    );
     const totalW = made.reduce((sum, t) => sum + t.width, 0) + gap * (made.length - 1);
     let bx = Math.max(gap, (w - totalW) / 2); // 収まりきらない場合も左端から詰めて全ボタンを残す
     for (const t of made) {
@@ -218,10 +222,9 @@ export class EditorScene extends Phaser.Scene {
         g.strokeRect(c * t + 2, r * t + 2, t - 4, t - 4);
       }
     }
-    // グリッド線（編集の目安）
-    g.lineStyle(1, COLORS.FLOOR_GRID, 0.8);
-    for (let c = 1; c < BALANCE.COLS; c++) g.lineBetween(c * t, 0, c * t, this.grid.length * t);
-    for (let r = 1; r < BALANCE.ROWS; r++) g.lineBetween(0, r * t, BALANCE.COLS * t, r * t);
+    // グリッド線（編集の目安）。タイルを自前で塗ってあるので床は塗らず、
+    // 目地がタイルの境界と厳密に一致するよう半ピクセルのずらしも入れない
+    drawFloorGrid(g, { fill: false, gridAlpha: 0.8, halfPixel: false });
   }
 
   /** 一時メッセージを表示する */

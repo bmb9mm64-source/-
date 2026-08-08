@@ -24,6 +24,7 @@ import type { TankBody } from "../core/types";
 import { GameWorld } from "../core/world";
 import { GamepadPoller } from "../input/gamepad";
 import { applyRenderScale, TEXT_RESOLUTION, toGameCoord } from "./renderScale";
+import { drawFloorGrid } from "./sceneUi";
 import { bindSceneAudio } from "./sceneAudio";
 import {
   mineButtonRect,
@@ -603,23 +604,11 @@ export class GameScene extends Phaser.Scene {
   /** 盤面（床・グリッド・壁・破壊可能壁・穴）の描画。X 破壊やミッション切替時に呼び直す */
   private drawStage(): void {
     const t = BALANCE.TILE;
-    const w = t * BALANCE.COLS;
-    const h = t * BALANCE.ROWS;
     const gfx = this.stageGfx;
     gfx.clear();
 
-    // 床
-    gfx.fillStyle(COLORS.FLOOR, 1);
-    gfx.fillRect(0, 0, w, h);
-
-    // 薄いグリッド線（盤面の視認性向上）
-    gfx.lineStyle(1, COLORS.FLOOR_GRID, 1);
-    for (let c = 1; c < BALANCE.COLS; c++) {
-      gfx.lineBetween(c * t + 0.5, 0, c * t + 0.5, h);
-    }
-    for (let r = 1; r < BALANCE.ROWS; r++) {
-      gfx.lineBetween(0, r * t + 0.5, w, r * t + 0.5);
-    }
+    // 床＋薄いグリッド線（タイトル画面と同じ絵。sceneUi の共通部品）
+    drawFloorGrid(gfx);
 
     // 壁・破壊可能壁・穴
     const stage = this.world.stage;
