@@ -33,6 +33,12 @@ const REST = -99;
 /** 直前の音を伸ばすことを表す値（音符の長さを揃えないための記号） */
 const HOLD = -98;
 
+/** ドラムのパターン（1小節内の何ステップ目で鳴らすか）。曲が持たない場合は null */
+interface DrumPattern {
+  readonly KICK: readonly number[];
+  readonly SNARE: readonly number[];
+}
+
 /** 半音数 → 周波数 [Hz] */
 function semitone(n: number): number {
   return B.ROOT_HZ * 2 ** (n / 12);
@@ -209,10 +215,11 @@ class BgmEngine {
     const bassNote = cfg.BASS[inBar % cfg.BASS.length]!;
     if (bassNote !== REST) this.bass(ctx, semitone(chord.ROOT + bassNote - 24), t);
 
-    // --- ドラム（テンポの速い曲のみ）。派手なフィルは入れず一定のグルーヴを保つ ---
-    if (cfg.DRUMS) {
-      if (inBar === 0 || inBar === 4) this.kick(ctx, t);
-      if (inBar === 2 || inBar === 6) this.snare(ctx, t);
+    // --- ドラム（DRUMS を持つ曲のみ）。派手なフィルは入れず一定のグルーヴを保つ ---
+    const drums: DrumPattern | null = cfg.DRUMS;
+    if (drums) {
+      if (drums.KICK.includes(inBar)) this.kick(ctx, t);
+      if (drums.SNARE.includes(inBar)) this.snare(ctx, t);
       this.hat(ctx, t, inBar % 2 === 0 ? 1 : B.HAT_SOFT); // 裏拍は弱く＝カチカチ耳に付かない
     }
   }

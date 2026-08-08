@@ -102,4 +102,12 @@ describe("BGM は長く聴いていられる形になっている", () => {
     expect(track.SWING).toBeGreaterThanOrEqual(0);
     expect(track.SWING).toBeLessThan(0.5);
   });
+
+  it.each(TRACKS)("%s：ドラムは小節内の実在するステップだけを叩く", (_name, track) => {
+    if (!track.DRUMS) return; // 静かな曲はドラムなし
+    for (const step of [...track.DRUMS.KICK, ...track.DRUMS.SNARE]) {
+      expect(step).toBeGreaterThanOrEqual(0);
+      expect(step).toBeLessThan(B.STEPS_PER_BAR);
+    }
+  });
 });
