@@ -57,6 +57,8 @@ export const BALANCE = {
     VOLLEY_BULLET_SPEED: 200, // 敵V「バースター」弾の弾速 [px/s]（やや遅く＝相殺の余地）
     PRISM_BULLET_SPEED: 280, // 敵G「プリズム」弾の弾速 [px/s]（GDD §6 v0.10）
     PRISM_MAX_BOUNCES: 3, // 敵G弾の反射上限（3回跳ねて盤面を長く飛び回る。GDD §6 v0.10）
+    TRACKER_BULLET_SPEED: 250, // 敵T「トラッカー」弾の弾速 [px/s]（GDD §6 v0.24）
+    LANCER_BULLET_SPEED: 200, // 敵L「ランサー」の突進後の一撃 [px/s]（GDD §6 v0.24）
     RADIUS: 4, // 弾の当たり判定半径 [px]
     MAX_BOUNCES: 1, // 反射上限（2回目の壁接触で消滅）
     MUZZLE_OFFSET: 22, // 砲口オフセット [px]（車体半径14+弾半径4 より外側 → 発射直後の自爆なし）
@@ -199,6 +201,55 @@ export const BALANCE = {
     FIRE_INTERVAL_VAR: 1.0,
     MAX_BULLETS: 1,
     FIRE_ANGLE_TOL: 0.15,
+  },
+
+  TRACKER: {
+    // 敵T「トラッカー」（偏差射撃型。GDD §6 v0.24。固定砲台＝turretAi の再利用）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (120 * Math.PI) / 180, // 砲塔回転速度 120°/s（ブレなし＝JITTER_* を持たない）
+    FIRE_INTERVAL_MEAN: 2.6, // 発射間隔の平均 [s]（難易度倍率の対象）
+    FIRE_INTERVAL_VAR: 0.8,
+    MAX_BULLETS: 1,
+    FIRE_ANGLE_TOL: 0.15,
+    // 偏差射撃の調整（GDD §6 v0.24）
+    LEAD_SMOOTH: 0.25, // 速度推定の時定数 [s]。小さいほど機敏だが1フレームの揺れで狙いが飛ぶ
+    LEAD_MAX_TILES: 6, // 予測のずらし幅の上限 [タイル]。上限が無いと遠距離で盤外を狙って永久に当たらない
+  },
+
+  LANCER: {
+    // 敵L「ランサー」（突進型。GDD §6 v0.24）
+    SIZE: 28,
+    RADIUS: 14,
+    SPEED: 60, // 通常時の移動速度 [px/s]（ゆっくり寄る）
+    TURN_SPEED: (140 * Math.PI) / 180, // 砲塔回転速度 140°/s
+    BODY_TURN_SPEED: 12,
+    FIRE_INTERVAL_MEAN: 3.5, // 通常射撃の間隔の平均 [s]（主脅威は突進なので控えめ）
+    FIRE_INTERVAL_VAR: 1.0,
+    MAX_BULLETS: 1,
+    FIRE_ANGLE_TOL: 0.15,
+    DASH_INTERVAL_MEAN: 3.0, // 突進の間隔の平均 [s]
+    DASH_INTERVAL_VAR: 1.0,
+    DASH_SPEED: 330, // 突進中の速度 [px/s]（プレイヤーの 120px/s より十分速い）
+    DASH_TIME: 0.7, // 突進の継続時間 [s]（330×0.7 ≒ 231px ＝ 約7タイル）
+    STUN_TIME: 0.8, // 激突後の硬直 [s]（＝反撃の窓）
+    // 「進めなかった」と判定する割合。壁ずりで多少動く場合があるので 0 にはしない
+    DASH_BLOCKED_RATIO: 0.3,
+  },
+
+  MIRROR: {
+    // 敵Y「ミラー」（反射装甲型。GDD §6 v0.24。固定砲台＝turretAi の再利用）
+    SIZE: 28,
+    RADIUS: 14,
+    TURN_SPEED: (100 * Math.PI) / 180, // 砲塔回転速度 100°/s
+    FIRE_INTERVAL_MEAN: 3.5,
+    FIRE_INTERVAL_VAR: 1.0,
+    MAX_BULLETS: 1,
+    FIRE_ANGLE_TOL: 0.15,
+    ARMOR_TURN_SPEED: (35 * Math.PI) / 180, // 装甲がプレイヤー方向へ追従する速度 35°/s
+    ARMOR_ARC: (50 * Math.PI) / 180, // 装甲が守る角度（正面から±50°＝計100°）
+    // 反射した弾を装甲の外へ押し出す余白 [px]。0 だと同フレームで再び重なって弾が貼り付く
+    REFLECT_PUSH: 2,
   },
 
   CHASER: {
@@ -579,6 +630,16 @@ export const COLORS = {
   REFLECTOR_BODY: 0x2aa8a0, // 敵E「リフレクター」は青緑（シアン）系のオリジナル配色（GDD §6 v0.9）
   REFLECTOR_TRACK: 0x1a6d68,
   REFLECTOR_TURRET: 0x8ff2e8,
+  TRACKER_BODY: 0xe8663c, // 敵T「トラッカー」は橙赤系のオリジナル配色（GDD §6 v0.24）
+  TRACKER_TRACK: 0x8c3a1e,
+  TRACKER_TURRET: 0xffb08a,
+  LANCER_BODY: 0x2f7a4f, // 敵L「ランサー」は深緑系のオリジナル配色（GDD §6 v0.24）
+  LANCER_TRACK: 0x1c4a30,
+  LANCER_TURRET: 0x8fe0b0,
+  MIRROR_BODY: 0x7fd4ff, // 敵Y「ミラー」は空色のオリジナル配色（GDD §6 v0.24）
+  MIRROR_TRACK: 0x3a7ea0,
+  MIRROR_TURRET: 0xe8f8ff,
+  MIRROR_ARMOR: 0xffffff, // 反射装甲の弧（白＝鏡面）
   CHASER_BODY: 0xaab4bf, // 敵F「チェイサー」は白銀系のオリジナル配色（GDD §6 v0.9）
   CHASER_TRACK: 0x6e7883,
   CHASER_TURRET: 0xf2f6fa,

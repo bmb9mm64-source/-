@@ -1,5 +1,5 @@
 /**
- * 敵10種のレジストリ（Phaser 非依存の純粋 TS）。
+ * 敵13種のレジストリ（Phaser 非依存の純粋 TS）。
  *
  * 「この敵はどう生成し・どう更新し・何色で描くか」を敵ごとに1エントリで持つ。
  * world.ts の生成／更新、GameScene の描画、エディタのパレット配色はすべてここを引くので、
@@ -10,6 +10,8 @@
 import { COLORS } from "../config/balance";
 import type { Bullet } from "./bullet";
 import { createChaser, type ChaserTank, updateChaser } from "./chaser";
+import { createLancer, type LancerTank, updateLancer } from "./lancer";
+import { createMirror, type MirrorTank, updateMirror } from "./mirror";
 import type { DifficultyMods } from "./difficulty";
 import type { EnemyChar, EnemyKind } from "./enemyKinds";
 import type { Rng } from "./mathUtils";
@@ -25,9 +27,10 @@ import { createSniper, type SniperTank, updateSniper } from "./sniper";
 import type { ParsedStage } from "./stage";
 import type { TankBlocker } from "./tank";
 import type { TargetInfo } from "./targeting";
+import { createTracker, type TrackerTank, updateTracker } from "./tracker";
 import { createVolley, type VolleyTank, updateVolley } from "./volley";
 
-/** 敵戦車（10種の判別可能なユニオン） */
+/** 敵戦車（13種の判別可能なユニオン） */
 export type EnemyTank =
   | SentryTank
   | RoverTank
@@ -38,10 +41,13 @@ export type EnemyTank =
   | PrismTank
   | ShielderTank
   | VolleyTank
-  | MortarTank;
+  | MortarTank
+  | TrackerTank
+  | LancerTank
+  | MirrorTank;
 
 /**
- * 敵AIに渡す周辺情報（10種ぶんを1つに統合したもの）。
+ * 敵AIに渡す周辺情報（13種ぶんを1つに統合したもの）。
  * blockers・mines は使わない敵が無視するだけなので、world 側は1つ作って全員に使い回せる。
  */
 export interface EnemyUpdateContext {
@@ -149,6 +155,24 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     { body: COLORS.MORTAR_BODY, track: COLORS.MORTAR_TRACK, turret: COLORS.MORTAR_TURRET },
     createMortar,
     updateMortar,
+  ),
+  tracker: def(
+    "T",
+    { body: COLORS.TRACKER_BODY, track: COLORS.TRACKER_TRACK, turret: COLORS.TRACKER_TURRET },
+    createTracker,
+    updateTracker,
+  ),
+  lancer: def(
+    "L",
+    { body: COLORS.LANCER_BODY, track: COLORS.LANCER_TRACK, turret: COLORS.LANCER_TURRET },
+    createLancer,
+    updateLancer,
+  ),
+  mirror: def(
+    "Y",
+    { body: COLORS.MIRROR_BODY, track: COLORS.MIRROR_TRACK, turret: COLORS.MIRROR_TURRET },
+    createMirror,
+    updateMirror,
   ),
 };
 

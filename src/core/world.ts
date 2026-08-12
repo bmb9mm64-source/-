@@ -39,6 +39,7 @@ import { tryFire } from "./firing";
 import { idlePlayerInput, type PlayerInput } from "./input";
 import { type Rng, rotateToward } from "./mathUtils";
 import { destroyXTiles, type Explosion, type Mine, tryPlaceMine, updateMines } from "./mine";
+import { armorReflects, reflectBullet } from "./mirror";
 import { shieldBlocks } from "./shielder";
 import { findNearbyFloor, type ParsedStage, parseStage } from "./stage";
 import { moveTank } from "./tank";
@@ -72,7 +73,8 @@ export type WorldEvent =
   | "missionClear" // ミッションクリア
   | "gameOver" // ゲームオーバー
   | "allClear" // 全ミッションクリア
-  | "shieldBlock"; // 敵S「シールダー」の盾が弾を防いだ（GDD §6 v0.14）
+  | "shieldBlock" // 敵S「シールダー」の盾が弾を防いだ（GDD §6 v0.14）
+  | "armorReflect"; // 敵Y「ミラー」の反射装甲が弾を跳ね返した（GDD §6 v0.24）
 
 function createPlayer(x: number, y: number, index: number): PlayerTank {
   return {
@@ -382,6 +384,13 @@ export class GameWorld {
       for (const e of this.enemies) {
         if (e === b.owner && !b.armed) continue; // 同上（発射直後の自弾）
         if (e.alive && bulletHitsTank(b, e)) {
+          // 敵Y「ミラー」は装甲の正面（±50°）から来た弾を**跳ね返す**（GDD §6 v0.24）。
+          // 弾は消えない＝発射者のまま返るので、正面から撃つと自分に当たる
+          if (e.kind === "mirror" && armorReflects(e, b)) {
+            reflectBullet(e, b);
+            this.events.push("armorReflect");
+            break;
+          }
           b.dead = true;
           // 敵S「シールダー」は盾の正面（±60°）から来た弾を無効化する（GDD §6 v0.14）
           if (e.kind === "shielder" && shieldBlocks(e, b)) {
