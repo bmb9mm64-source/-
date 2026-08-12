@@ -1,10 +1,10 @@
 /**
  * 敵F「チェイサー」（追跡型）のAI（GDD §6 v0.9）。
  * 移動・回避は敵B「ローバー」の WANDER/DODGE 構造の流用（手順は enemyAi.ts に集約）。差分：
- *   - 移動 110px/s。徘徊ではなく**プレイヤー追跡**＝最寄り生存プレイヤーの周辺
- *     （±3タイル以内）の床タイルを目標に選び、1.0〜2.0 s ごとに引き直し続ける
+ *   - 移動 130px/s。徘徊ではなく**プレイヤー追跡**。ただし詰めきらず、最寄り生存プレイヤーから
+ *     **3〜6タイル離れた**床タイルを目標に選び、1.0〜2.0 s ごとに引き直し続ける（v0.24）
  *   - 照準 200°/s
- *   - 弾 225px/s（難易度弾速倍率の対象）・反射1回・同時1発・発射間隔 平均 1.0±0.3 s（難易度倍率対象）
+ *   - 弾 225px/s（難易度弾速倍率の対象）・反射1回・同時2発・発射間隔 平均 0.85±0.3 s（難易度倍率対象）
  *   - 回避はローバーと同方式だが**成功率50%固定**（難易度対象外。GDD §6 v0.9）
  * Phaser 非依存の純粋 TS。乱数は Rng を注入して決定的テスト可能。
  */
@@ -63,23 +63,34 @@ export function createChaser(
 }
 
 /**
- * 追跡目標の抽選（GDD §6 v0.9）：anchor（最寄り生存プレイヤー）のタイル±rangeTiles の範囲から
- * ランダムに床タイルを引き、その中心を返す。一定回数試して床が引けなければ anchor の位置そのもの
- * （＝プレイヤーへ直進。壁は moveTank ＋行き詰まり検知で解決）を返す。
+ * 追跡目標の抽選（GDD §6 v0.9／v0.24 改定）。
+ *
+ * anchor（最寄り生存プレイヤー）を中心とする **円環**（minTiles〜maxTiles）から
+ * ランダムに床タイルを引き、その中心を返す。一定回数試して床が引けなければ
+ * anchor の位置そのもの（＝プレイヤーへ直進。壁は moveTank ＋行き詰まり検知で解決）を返す。
+ *
+ * v0.24 で「±rangeTiles の正方形」から円環に変えた。正方形だと距離0のタイルも引けてしまい、
+ * **至近距離まで詰めてそのまま撃たれるだけの的**になっていたため（GDD §6 の強化理由）。
+ * 円環にすると詰めきらずに周囲を回り続けるので、動きながらの撃ち合いになる。
+ *
+ * 乱数の消費数は1回の試行につき2回のまま（従来と同じ）。
+ * 敵全体で1つの乱数列を共有しているので、消費数を変えると他の敵の挙動まで変わってしまう。
  */
 export function pickChaseTarget(
   stage: ParsedStage,
   rng: Rng,
   anchor: Vec2,
-  rangeTiles: number = BALANCE.CHASER.CHASE_RANGE_TILES,
+  minTiles: number = BALANCE.CHASER.CHASE_MIN_TILES,
+  maxTiles: number = BALANCE.CHASER.CHASE_MAX_TILES,
   tries: number = BALANCE.CHASER.CHASE_PICK_TRIES,
 ): Vec2 {
   const anchorCol = Math.floor(anchor.x / stage.tile);
   const anchorRow = Math.floor(anchor.y / stage.tile);
-  const span = rangeTiles * 2 + 1; // ±rangeTiles → 一辺のタイル数
   for (let i = 0; i < tries; i++) {
-    const col = anchorCol - rangeTiles + Math.floor(rng() * span);
-    const row = anchorRow - rangeTiles + Math.floor(rng() * span);
+    const angle = rng() * Math.PI * 2;
+    const dist = minTiles + rng() * (maxTiles - minTiles);
+    const col = anchorCol + Math.round(Math.cos(angle) * dist);
+    const row = anchorRow + Math.round(Math.sin(angle) * dist);
     if (tileAt(stage, col, row) === ".") {
       return {
         x: col * stage.tile + stage.tile / 2,

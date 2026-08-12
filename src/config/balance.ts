@@ -205,16 +205,19 @@ export const BALANCE = {
     // 敵F「チェイサー」（追跡型。GDD §6 v0.9。移動・回避はローバーの WANDER 構造の流用）
     SIZE: 28,
     RADIUS: 14,
-    SPEED: 110, // 移動速度 [px/s]
+    SPEED: 130, // 移動速度 [px/s]（v0.24：110→130）
     TURN_SPEED: (200 * Math.PI) / 180, // 砲塔回転速度 200°/s
     BODY_TURN_SPEED: 12, // 車体の向きの追従速度 [rad/s]（演出用）
-    FIRE_INTERVAL_MEAN: 1.0, // 発射間隔の平均 [s]（難易度倍率の対象）
+    FIRE_INTERVAL_MEAN: 0.85, // 発射間隔の平均 [s]（難易度倍率の対象。v0.24：1.0→0.85）
     FIRE_INTERVAL_VAR: 0.3, // 発射間隔のゆらぎ幅（±）[s]
-    MAX_BULLETS: 1, // 同時発射数上限
+    MAX_BULLETS: 2, // 同時発射数上限（v0.24：1→2。間合いを取るぶん手数で圧をかける）
     FIRE_ANGLE_TOL: 0.15, // 発射許可の照準許容角 [rad]（セントリーと同様）
     RETARGET_INTERVAL_MIN: 1.0, // 追跡目標を引き直す間隔（最小）[s]（GDD「1.0〜2.0s」）
     RETARGET_INTERVAL_MAX: 2.0, // 追跡目標を引き直す間隔（最大）[s]
-    CHASE_RANGE_TILES: 3, // 追跡目標の抽選範囲：最寄り生存プレイヤーのタイル±3タイル（GDD §6 v0.9）
+    // 追跡目標の抽選範囲（GDD §6 v0.24）：プレイヤーを中心とする円環。
+    // 内側を 0 にしない＝詰めきらないことが強化の肝（至近距離は撃たれるだけの的になる）。
+    CHASE_MIN_TILES: 3, // 円環の内半径 [タイル]
+    CHASE_MAX_TILES: 6, // 円環の外半径 [タイル]
     ARRIVE_DIST: 8, // 目標到達とみなす距離 [px]
     STUCK_TIME: 0.25, // 壁・戦車に行き詰まったと判断するまでの時間 [s]
     CHASE_PICK_TRIES: 20, // 追跡目標（床タイル）の抽選試行回数
