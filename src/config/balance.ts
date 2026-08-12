@@ -630,12 +630,16 @@ export const COLORS = {
   REFLECTOR_BODY: 0x2aa8a0, // 敵E「リフレクター」は青緑（シアン）系のオリジナル配色（GDD §6 v0.9）
   REFLECTOR_TRACK: 0x1a6d68,
   REFLECTOR_TURRET: 0x8ff2e8,
-  TRACKER_BODY: 0xe8663c, // 敵T「トラッカー」は橙赤系のオリジナル配色（GDD §6 v0.24）
-  TRACKER_TRACK: 0x8c3a1e,
-  TRACKER_TURRET: 0xffb08a,
-  LANCER_BODY: 0x2f7a4f, // 敵L「ランサー」は深緑系のオリジナル配色（GDD §6 v0.24）
-  LANCER_TRACK: 0x1c4a30,
-  LANCER_TURRET: 0x8fe0b0,
+  // 敵T「トラッカー」はライム（黄緑）系。最初 0xe8663c（橙赤）にしたが
+  // 敵V「バースター」の 0xe0562f とほぼ同色で見分けがつかなかったため、空いていた黄緑帯へ移した
+  TRACKER_BODY: 0xa8d92e,
+  TRACKER_TRACK: 0x5f7a18,
+  TRACKER_TURRET: 0xe8ffa0,
+  // 敵L「ランサー」は藍紫（インディゴ）系。最初 0x2f7a4f（深緑）にしたが
+  // 敵M「ボマー」（オリーブ）と 2P（緑）に近すぎたため、空いていた藍紫帯へ移した
+  LANCER_BODY: 0x5b52e0,
+  LANCER_TRACK: 0x322b8c,
+  LANCER_TURRET: 0xc0b8ff,
   MIRROR_BODY: 0x7fd4ff, // 敵Y「ミラー」は空色のオリジナル配色（GDD §6 v0.24）
   MIRROR_TRACK: 0x3a7ea0,
   MIRROR_TURRET: 0xe8f8ff,
