@@ -51,6 +51,9 @@ const BASE_COLORS: Record<string, number> = {
 };
 
 /** パレットの表示ラベル（タイル記号と同順） */
+/** パレットの左右余白 [px] */
+const PALETTE_MARGIN = 6;
+
 const TILE_LABELS = Object.fromEntries(
   EDITOR_TILES.map((t) => [t, BASE_LABELS[t] ?? `敵${t}`]),
 ) as Record<EditorTile, string>;
@@ -115,20 +118,24 @@ export class EditorScene extends Phaser.Scene {
     topBar.fillStyle(0x11141c, 0.92);
     topBar.fillRect(0, 0, w, BALANCE.TILE);
     this.paletteMarks = [];
+    // 1マスの幅は**タイル数から決める**（固定値 53px にしていたら、敵が13種になった
+    // v0.24 でパレットが画面からはみ出して右端の3種が押せなくなった。GDD §12.7）
+    const slotW = Math.floor((w - PALETTE_MARGIN * 2) / EDITOR_TILES.length);
     EDITOR_TILES.forEach((tile, i) => {
-      const x = 6 + i * 53;
+      const x = PALETTE_MARGIN + i * slotW;
+      const mid = x + slotW / 2;
       const mark = this.add
-        .rectangle(x + 24, 16, 50, 26, 0x000000, 0)
+        .rectangle(mid, 16, slotW - 3, 26, 0x000000, 0)
         .setStrokeStyle(2, 0xffffff, 0)
         .setDepth(7);
       this.paletteMarks.push(mark);
-      this.add.rectangle(x + 9, 16, 16, 16, TILE_COLORS[tile]).setDepth(6);
+      this.add.rectangle(x + 8, 16, 13, 13, TILE_COLORS[tile]).setDepth(6);
       this.add
-        .text(x + 20, 16, TILE_LABELS[tile], { ...barStyle, fontSize: "12px" })
+        .text(x + 17, 16, TILE_LABELS[tile], { ...barStyle, fontSize: "11px" })
         .setOrigin(0, 0.5)
         .setDepth(6);
       this.add
-        .rectangle(x + 24, 16, 52, 30, 0x000000, 0.001) // クリック領域
+        .rectangle(mid, 16, slotW, 30, 0x000000, 0.001) // クリック領域
         .setDepth(8)
         .setInteractive({ useHandCursor: true })
         .on("pointerdown", () => {

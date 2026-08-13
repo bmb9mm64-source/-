@@ -190,6 +190,10 @@ class SfxEngine {
         // 盾で弾かれた音（相殺音を低めに鳴らして「無効化された」ことを伝える）
         this.cancel();
         break;
+      case "armorReflect":
+        // 反射装甲で跳ね返された音（跳弾と同じ音＝「返ってきた」ことを弾の音で伝える）
+        this.bounce();
+        break;
       case "tankDestroyed":
       case "playerHit":
         this.destroy();

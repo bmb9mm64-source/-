@@ -37,6 +37,24 @@ const OPEN_12X8 = [
   "############",
 ];
 
+/** 円環（3〜6タイル）が丸ごと入る広さ（20×14）の全面床ステージ */
+const OPEN_20X14 = [
+  "####################",
+  "#P.................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "#..................#",
+  "####################",
+];
+
 function makeCtx(overrides: Partial<ChaserUpdateContext> = {}): ChaserUpdateContext {
   return {
     players: [{ x: 80, y: 112, alive: true }],
@@ -49,48 +67,71 @@ function makeCtx(overrides: Partial<ChaserUpdateContext> = {}): ChaserUpdateCont
   };
 }
 
-describe("チェイサーの追跡目標（pickChaseTarget）", () => {
-  it("目標は最寄り生存プレイヤーのタイル±3タイル以内の床タイル中心から選ばれる", () => {
-    const stage = makeStage(OPEN_12X8);
-    const anchor = { x: 5.5 * T, y: 4.5 * T }; // タイル (5,4)
-    // 乱数を散らして何度も引き、全て ±3 タイル以内・床タイル中心であることを確認する
+describe("チェイサーの追跡目標（pickChaseTarget・GDD §6 v0.24）", () => {
+  it("目標はプレイヤーを中心とする円環（3〜6タイル）の床タイル中心から選ばれる", () => {
+    const stage = makeStage(OPEN_20X14);
+    const anchor = { x: 9.5 * T, y: 6.5 * T }; // タイル (9,6)
+    // 乱数を散らして何度も引き、全て円環の内側・床タイル中心であることを確認する
     const values = [0.0, 0.99, 0.3, 0.7, 0.15, 0.85, 0.45, 0.6, 0.05, 0.95];
     let i = 0;
     const rng = (): number => values[i++ % values.length]!;
-    for (let n = 0; n < 20; n++) {
+    const { CHASE_MIN_TILES: MIN, CHASE_MAX_TILES: MAX } = BALANCE.CHASER;
+    let picked = 0;
+    for (let n = 0; n < 40; n++) {
       const target = pickChaseTarget(stage, rng, anchor);
+      if (target.x === anchor.x && target.y === anchor.y) continue; // 全試行が外れた保険の戻り値
+      picked++;
       const col = Math.floor(target.x / T);
       const row = Math.floor(target.y / T);
-      expect(Math.abs(col - 5)).toBeLessThanOrEqual(BALANCE.CHASER.CHASE_RANGE_TILES);
-      expect(Math.abs(row - 4)).toBeLessThanOrEqual(BALANCE.CHASER.CHASE_RANGE_TILES);
+      const dist = Math.hypot(col - 9, row - 6);
+      // 丸めのぶん半タイルの誤差を許容する（cos/sin の結果を最寄りタイルへ丸めているため）
+      expect(dist).toBeGreaterThanOrEqual(MIN - 0.75);
+      expect(dist).toBeLessThanOrEqual(MAX + 0.75);
       expect(stage.grid[row]![col]).toBe("."); // 床タイルのみ
       expect(target.x % T).toBeCloseTo(T / 2, 6); // タイル中心
       expect(target.y % T).toBeCloseTo(T / 2, 6);
     }
+    expect(picked, "少なくとも1回は円環から引けているはず").toBeGreaterThan(0);
+  });
+
+  it("**至近距離は選ばない**（詰めきって的にならないための強化点）", () => {
+    const stage = makeStage(OPEN_20X14);
+    const anchor = { x: 9.5 * T, y: 6.5 * T };
+    let i = 0;
+    const values = [0.0, 0.1, 0.25, 0.4, 0.5, 0.66, 0.75, 0.9, 0.99, 0.33];
+    const rng = (): number => values[i++ % values.length]!;
+    for (let n = 0; n < 40; n++) {
+      const target = pickChaseTarget(stage, rng, anchor);
+      if (target.x === anchor.x && target.y === anchor.y) continue;
+      const dist = Math.hypot(Math.floor(target.x / T) - 9, Math.floor(target.y / T) - 6);
+      expect(dist, "プレイヤーに重なる位置は目標にしない").toBeGreaterThan(1);
+    }
   });
 
   it("床が引けないときはアンカー（プレイヤー位置）そのものを返す（保険）", () => {
-    // 固定乱数で常に範囲外（壁扱い）の左上オフセットを引き続けさせ、全試行を外させる
+    // 細い回廊なので、円環上のタイルはほぼ全て壁＝全試行を外させる
     const stage = makeStage(CORRIDOR_12X3);
     const anchor = { x: 5.5 * T, y: 1.5 * T };
-    const rngWall = (): number => 0.0; // col-3, row-3 → 回廊の外＝壁扱い
-    const target = pickChaseTarget(stage, rngWall, anchor, 3, 5);
+    const rngWall = (): number => 0.25; // 角度 π/2＝真下、距離は最小 → 回廊の外＝壁扱い
+    const target = pickChaseTarget(stage, rngWall, anchor, 3, 6, 5);
     expect(target).toEqual({ x: anchor.x, y: anchor.y });
   });
 });
 
-describe("チェイサーAI（GDD §6 v0.9）", () => {
-  it("プレイヤーを追跡して距離が縮む（rng=0.5 では目標＝プレイヤーのタイル）", () => {
-    const stage = makeStage(OPEN_12X8);
-    const player = { x: 9.5 * T, y: 5.5 * T, alive: true };
+describe("チェイサーAI（GDD §6 v0.9／v0.24 強化）", () => {
+  it("プレイヤーへ寄るが、**詰めきらない**（GDD §6 v0.24 の強化点）", () => {
+    const stage = makeStage(OPEN_20X14);
+    const player = { x: 13.5 * T, y: 6.5 * T, alive: true };
     const e = createChaser(1.5 * T, 1.5 * T, rngHalf);
     e.fireTimer = 99; // 射撃は起こさない（移動だけを見る）
     const ctx = makeCtx({ players: [player], stage });
     const dist0 = Math.hypot(player.x - e.x, player.y - e.y);
     for (let i = 0; i < 20; i++) updateChaser(e, 0.05, ctx); // 1.0s
-    const dist1 = Math.hypot(player.x - e.x, player.y - e.y);
-    expect(dist1).toBeLessThan(dist0); // 追跡で接近している
-    expect(dist0 - dist1).toBeCloseTo(BALANCE.CHASER.SPEED * 1.0, 0); // 110px/s で直進
+    expect(Math.hypot(player.x - e.x, player.y - e.y)).toBeLessThan(dist0); // 接近はする
+    for (let i = 0; i < 400; i++) updateChaser(e, 0.05, ctx); // さらに20秒
+    const settled = Math.hypot(player.x - e.x, player.y - e.y);
+    // 至近距離まで詰めない＝「近づいて処理する」が通じない。円環の内半径付近で落ち着く
+    expect(settled).toBeGreaterThan((BALANCE.CHASER.CHASE_MIN_TILES - 1) * T);
   });
 
   it("移動速度はフレームレートに依存しない（dt 分割でも同じ距離）", () => {
@@ -106,16 +147,17 @@ describe("チェイサーAI（GDD §6 v0.9）", () => {
     expect(run(0.05, 10)).toBeCloseTo(run(0.01, 50), 5); // 合計0.5秒ぶんの移動距離が一致
   });
 
-  it("発射間隔は平均1.0s（rng=0.5）：間隔消化後に発射し、同時1発を守る", () => {
-    expect(chaserNextInterval(rngHalf)).toBeCloseTo(BALANCE.CHASER.FIRE_INTERVAL_MEAN, 6);
+  it("発射間隔は平均0.85s（rng=0.5）：間隔消化後に発射し、同時2発を守る（v0.24）", () => {
+    const MEAN = BALANCE.CHASER.FIRE_INTERVAL_MEAN;
+    expect(chaserNextInterval(rngHalf)).toBeCloseTo(MEAN, 6);
     const stage = makeStage(CORRIDOR_12X3);
     const player = { x: 10.5 * T, y: 1.5 * T, alive: true };
     const e = createChaser(2.5 * T, 1.5 * T, rngHalf);
-    expect(e.fireTimer).toBeCloseTo(1.0, 6); // 生成時の初期間隔も平均1.0s
+    expect(e.fireTimer).toBeCloseTo(MEAN, 6); // 生成時の初期間隔も平均値
     const ctx = makeCtx({ players: [player], stage });
-    for (let i = 0; i < 19; i++) updateChaser(e, 0.05, ctx); // 0.95s：まだ間隔を消化していない
+    for (let i = 0; i < 16; i++) updateChaser(e, 0.05, ctx); // 0.80s：まだ間隔を消化していない
     expect(ctx.bullets).toHaveLength(0);
-    for (let i = 0; i < 6; i++) updateChaser(e, 0.05, ctx); // 1.25s まで
+    for (let i = 0; i < 3; i++) updateChaser(e, 0.05, ctx); // 0.95s まで
     expect(ctx.bullets).toHaveLength(1); // 間隔消化後に発射
     expect(ctx.bullets[0]!.owner).toBe(e);
     expect(Math.hypot(ctx.bullets[0]!.vx, ctx.bullets[0]!.vy)).toBeCloseTo(
@@ -123,9 +165,9 @@ describe("チェイサーAI（GDD §6 v0.9）", () => {
       6,
     ); // 225px/s（NORMAL）
     expect(e.fireTimer).toBeGreaterThan(0); // 次回間隔が再設定された
-    // 自弾が場に残っている限り、さらに回しても撃たない（同時1発）
-    for (let i = 0; i < 60; i++) updateChaser(e, 0.05, ctx);
-    expect(ctx.bullets).toHaveLength(1);
+    // 同時2発までは撃てるが、それ以上は自弾が消えるまで撃たない
+    for (let i = 0; i < 200; i++) updateChaser(e, 0.05, ctx);
+    expect(ctx.bullets.length).toBeLessThanOrEqual(BALANCE.CHASER.MAX_BULLETS);
   });
 
   it("プレイヤー弾の接近で DODGE に遷移する（成功率50%：rng=0.4 で成功）", () => {

@@ -36,6 +36,13 @@ export type TurretFsmState = "IDLE" | "AIM" | "RELOAD";
 /** 跳弾狙撃のポリシー */
 export type RicochetPolicy = "roll" | "always";
 
+/**
+ * 狙い点の差し替え（GDD §6 v0.24。敵T「トラッカー」の偏差射撃で使う）。
+ * 標的の現在位置ではない場所を狙わせたいときに渡す。**直接射撃のときだけ**適用され、
+ * 跳弾狙撃の反射点には効かない（反射の幾何は現在位置で解いているため）。
+ */
+export type AimSolver = (e: TurretTank, target: TargetInfo, dt: number) => { x: number; y: number };
+
 /** 固定砲台の共通状態（各 *Tank はこれを継承する） */
 export interface TurretTank extends TankBody {
   state: TurretFsmState;
@@ -80,6 +87,7 @@ export function updateTurretAi(
   cfg: TurretConfig,
   bulletCfg: BulletSpawnConfig,
   policy: RicochetPolicy,
+  aimSolver?: AimSolver,
 ): void {
   const mods = ctx.mods ?? NORMAL_MODS;
 
@@ -102,7 +110,9 @@ export function updateTurretAi(
   const tryRicochet =
     policy === "always" ? !direct : e.state === "AIM" && !direct && e.ricochetMode;
   const shot = tryRicochet ? refreshRicochet(e, dt, ctx.stage, p) : clearRicochet(e);
-  const aimTarget = shot ? shot.aimAngle : Math.atan2(p.y - e.y, p.x - e.x);
+  // 直接射撃のときだけ狙い点を差し替えられる（偏差射撃。GDD §6 v0.24）
+  const aimAt = shot ? null : (aimSolver?.(e, p, dt) ?? p);
+  const aimTarget = shot ? shot.aimAngle : Math.atan2(aimAt!.y - e.y, aimAt!.x - e.x);
   e.turretAngle = rotateToward(e.turretAngle, aimTarget + e.jitter, cfg.TURN_SPEED * dt);
 
   // --- 状態遷移 ---

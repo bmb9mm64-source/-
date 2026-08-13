@@ -147,6 +147,20 @@ export const PRISM_BULLET_CFG: BulletSpawnConfig = {
   MAX_BOUNCES: BALANCE.BULLET.PRISM_MAX_BOUNCES,
 };
 
+/** 敵T「トラッカー」弾の生成設定（GDD §6 v0.24：250px/s・反射1回。見た目は通常弾） */
+export const TRACKER_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.TRACKER_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+};
+
+/** 敵L「ランサー」が突進後に撃つ一撃（GDD §6 v0.24：200px/s・反射1回） */
+export const LANCER_BULLET_CFG: BulletSpawnConfig = {
+  SPEED: BALANCE.BULLET.LANCER_BULLET_SPEED,
+  RADIUS: BALANCE.BULLET.RADIUS,
+  MUZZLE_OFFSET: BALANCE.BULLET.MUZZLE_OFFSET,
+};
+
 /** 敵V「バースター」弾の生成設定（GDD §6 v0.14：200px/s・反射1回） */
 export const VOLLEY_BULLET_CFG: BulletSpawnConfig = {
   SPEED: BALANCE.BULLET.VOLLEY_BULLET_SPEED,

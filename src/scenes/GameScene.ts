@@ -814,6 +814,25 @@ export class GameScene extends Phaser.Scene {
     this.clearFx = null;
   }
 
+  /**
+   * 敵Y「ミラー」の反射装甲（GDD §6 v0.24）。
+   * 盾（吸収）と見分けがつくよう、**二重の白い弧**で「鏡面」であることを示す。
+   * 判定と同じ角度（ARMOR_ARC）で描くので、見た目と当たり判定がずれない。
+   */
+  private drawArmor(e: TankBody & { armorAngle: number }): void {
+    const g = this.dynGfx;
+    const arc = BALANCE.MIRROR.ARMOR_ARC;
+    for (const [radius, width, alpha] of [
+      [e.radius + 6, 4, 0.95],
+      [e.radius + 11, 2, 0.55],
+    ] as const) {
+      g.lineStyle(width, COLORS.MIRROR_ARMOR, alpha);
+      g.beginPath();
+      g.arc(e.x, e.y, radius, e.armorAngle - arc, e.armorAngle + arc);
+      g.strokePath();
+    }
+  }
+
   private drawShield(e: TankBody & { shieldAngle: number }): void {
     const g = this.dynGfx;
     const r = e.radius + 6;
@@ -971,6 +990,8 @@ export class GameScene extends Phaser.Scene {
       this.drawTank(e, col.body, col.track, col.turret);
       // 敵S「シールダー」だけは盾の弧も描く（守っている向きが一目で分かるように）
       if (e.kind === "shielder") this.drawShield(e);
+      // 敵Y「ミラー」は反射装甲の弧を描く（正面から撃つと返ってくる向きが読めるように）
+      if (e.kind === "mirror") this.drawArmor(e);
     }
     for (const p of world.players) {
       if (!p.alive) continue;

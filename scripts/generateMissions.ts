@@ -66,19 +66,197 @@ function placeBlock(g: Grid, rand: () => number, ch: string): void {
   }
 }
 
-/** 盤面の地形を作る（左右対称にすると「設計された」印象になりやすい） */
-function buildTerrain(rand: () => number, blocks: number, symmetric: boolean): Grid {
-  const g = emptyGrid();
-  for (let i = 0; i < blocks; i++) placeBlock(g, rand, "#");
-  if (rand() < 0.5) placeBlock(g, rand, "X"); // 破壊可能壁
-  if (rand() < 0.4) {
-    // 弾だけが通る堀（H）を1本
-    const r = randInt(rand, 3, ROWS - 4);
-    const c0 = randInt(rand, 3, COLS - 8);
-    const len = randInt(rand, 3, 6);
-    for (let c = c0; c < c0 + len; c++) if (g[r]![c] === ".") g[r]![c] = "H";
+/** 指定の矩形を塗る（盤面の内側にはみ出さないようクリップする） */
+function fillRect(g: Grid, c0: number, r0: number, w: number, h: number, ch: string): void {
+  for (let r = Math.max(1, r0); r < Math.min(ROWS - 1, r0 + h); r++) {
+    for (let c = Math.max(1, c0); c < Math.min(COLS - 1, c0 + w); c++) g[r]![c] = ch;
   }
-  if (symmetric) {
+}
+
+/**
+ * 地形の型（GDD §7 v0.24）。
+ *
+ * v0.23 までは「ランダムな矩形ブロックを4〜8個置く」だけだったため、
+ * 34面が全部同じ顔になっていた（オーナー指摘「ステージが単調」）。
+ * 面ごとに型を選び、その型に沿って地形を組み立てる。
+ *
+ * どの型も**通路の幅を1タイル以上**確保する。生成後の検証（到達範囲・攻撃手段・
+ * 安全地帯・移動域）は型によらず全て通すので、型が増えても保証は変わらない。
+ */
+export type TerrainKind =
+  | "open"
+  | "corridor"
+  | "rooms"
+  | "pillars"
+  | "fortress"
+  | "serpentine"
+  | "moat"
+  | "cages";
+
+/** 型の巡回順（隣り合う面が同じ型にならないよう、この順で回す） */
+export const TERRAIN_CYCLE: readonly TerrainKind[] = [
+  "corridor",
+  "pillars",
+  "rooms",
+  "open",
+  "fortress",
+  "moat",
+  "serpentine",
+  "cages",
+];
+
+/** ミッション番号から地形の型を決める（M50 は総仕上げの要塞で固定） */
+export function terrainFor(n: number): TerrainKind {
+  if (n === 50) return "fortress";
+  return TERRAIN_CYCLE[(n - 17) % TERRAIN_CYCLE.length]!;
+}
+
+/** 型ごとの地形を組み立てる */
+function buildTerrainOf(kind: TerrainKind, rand: () => number): Grid {
+  const g = emptyGrid();
+  switch (kind) {
+    case "open": {
+      // 従来の形。まばらな島を置くだけ
+      for (let i = 0; i < randInt(rand, 4, 7); i++) placeBlock(g, rand, "#");
+      break;
+    }
+    case "corridor": {
+      // 縦横の隔壁を等間隔に並べ、1マスずつ開けて格子状の通路にする。
+      // 曲がり角が多く、**幅1の通路＝地雷が効く**
+      const stepC = randInt(rand, 4, 6);
+      const stepR = randInt(rand, 4, 5);
+      for (let c = 2 + randInt(rand, 0, 1); c < COLS - 2; c += stepC) {
+        fillRect(g, c, 1, 1, ROWS - 2, "#");
+        const gap = randInt(rand, 1, ROWS - 3); // 通り抜けの穴を2つ開ける
+        const gap2 = randInt(rand, 1, ROWS - 3);
+        g[gap]![c] = ".";
+        g[gap2]![c] = ".";
+      }
+      for (let r = 2 + randInt(rand, 0, 1); r < ROWS - 2; r += stepR) {
+        fillRect(g, 1, r, COLS - 2, 1, "#");
+        g[r]![randInt(rand, 1, COLS - 2)] = ".";
+        g[r]![randInt(rand, 1, COLS - 2)] = ".";
+      }
+      break;
+    }
+    case "rooms": {
+      // 十字の隔壁で4部屋に分け、各壁に1つずつ出入口を開ける。
+      // **出入口が必ず幅1の隘路になる＝地雷が最も効く型**
+      const midC = Math.floor(COLS / 2) + randInt(rand, -2, 2);
+      const midR = Math.floor(ROWS / 2) + randInt(rand, -1, 1);
+      fillRect(g, midC, 1, 1, ROWS - 2, "#");
+      fillRect(g, 1, midR, COLS - 2, 1, "#");
+      g[randInt(rand, 1, midR - 1)]![midC] = "."; // 上半分の出入口
+      g[randInt(rand, midR + 1, ROWS - 2)]![midC] = "."; // 下半分の出入口
+      g[midR]![randInt(rand, 1, midC - 1)] = "."; // 左半分の出入口
+      g[midR]![randInt(rand, midC + 1, COLS - 2)] = "."; // 右半分の出入口
+      // 各部屋の中にも遮蔽物を置く。何も無いと部屋がただの広場になり、
+      // 隘路が出入口の4マスしか無くなって「地雷が活きる」条件を満たせない
+      for (let i = 0; i < randInt(rand, 3, 5); i++) placeBlock(g, rand, "#");
+      break;
+    }
+    case "pillars": {
+      // 1×1 の柱を散らす。直射がほとんど通らず**跳弾の宝庫**になる
+      const stepC = randInt(rand, 3, 4);
+      const stepR = randInt(rand, 3, 4);
+      for (let r = 2; r < ROWS - 2; r += stepR) {
+        for (let c = 2; c < COLS - 2; c += stepC) {
+          if (rand() < 0.8) g[r]![c] = "#";
+        }
+      }
+      break;
+    }
+    case "fortress": {
+      // 中央に壁で囲った小部屋。四方に1マスずつ入口を開ける。
+      // 中に置かれた敵は跳弾でしか狙えない
+      const w = randInt(rand, 6, 9);
+      const h = randInt(rand, 4, 5);
+      const c0 = Math.floor((COLS - w) / 2);
+      const r0 = Math.floor((ROWS - h) / 2);
+      fillRect(g, c0, r0, w, 1, "#");
+      fillRect(g, c0, r0 + h - 1, w, 1, "#");
+      fillRect(g, c0, r0, 1, h, "#");
+      fillRect(g, c0 + w - 1, r0, 1, h, "#");
+      g[r0]![c0 + randInt(rand, 1, w - 2)] = ".";
+      g[r0 + h - 1]![c0 + randInt(rand, 1, w - 2)] = ".";
+      g[r0 + randInt(rand, 1, h - 2)]![c0] = ".";
+      g[r0 + randInt(rand, 1, h - 2)]![c0 + w - 1] = ".";
+      for (let i = 0; i < randInt(rand, 2, 3); i++) placeBlock(g, rand, "#");
+      break;
+    }
+    case "serpentine": {
+      // 左右交互に伸びる長い隔壁。一本道を押し上げていく形になる
+      const stepR = randInt(rand, 3, 4);
+      let fromLeft = rand() < 0.5;
+      for (let r = 2 + randInt(rand, 0, 1); r < ROWS - 2; r += stepR) {
+        const len = randInt(rand, COLS - 8, COLS - 5);
+        if (fromLeft) fillRect(g, 1, r, len, 1, "#");
+        else fillRect(g, COLS - 1 - len, r, len, 1, "#");
+        fromLeft = !fromLeft;
+      }
+      break;
+    }
+    case "moat": {
+      // 穴 H の帯で盤面を分断する（戦車は渡れず弾だけが通る）。撃ち合い専用の間合い
+      const vertical = rand() < 0.5;
+      if (vertical) {
+        const c = Math.floor(COLS / 2) + randInt(rand, -3, 3);
+        fillRect(g, c, 1, 1, ROWS - 2, "H");
+        fillRect(g, c, randInt(rand, 1, ROWS - 4), 1, 2, "."); // 1箇所だけ渡れる
+      } else {
+        const r = Math.floor(ROWS / 2) + randInt(rand, -2, 2);
+        fillRect(g, 1, r, COLS - 2, 1, "H");
+        fillRect(g, randInt(rand, 1, COLS - 4), r, 2, 1, ".");
+      }
+      for (let i = 0; i < randInt(rand, 3, 5); i++) placeBlock(g, rand, "#");
+      break;
+    }
+    case "cages": {
+      // 敵を囲う小さな檻をいくつか置く（1辺に隙間を作らないので跳弾必須の的になる）
+      for (let i = 0; i < randInt(rand, 2, 3); i++) {
+        const w = 3;
+        const h = 3;
+        const c0 = randInt(rand, 2, COLS - 2 - w);
+        const r0 = randInt(rand, 2, ROWS - 2 - h);
+        fillRect(g, c0, r0, w, 1, "#");
+        fillRect(g, c0, r0 + h - 1, w, 1, "#");
+        fillRect(g, c0, r0, 1, h, "#");
+        fillRect(g, c0 + w - 1, r0, 1, h, "#");
+        g[r0 + 1]![c0 + 1] = "."; // 中は床（ここに敵が入ると跳弾でしか狙えない）
+      }
+      for (let i = 0; i < randInt(rand, 2, 4); i++) placeBlock(g, rand, "#");
+      break;
+    }
+  }
+
+  // --- 地雷が活きる条件（GDD §7 v0.24）：破壊可能壁 X を必ず2箇所以上置く ---
+  // 従来は「50%の確率で1つ」だったので、ほとんどの面で地雷を使う理由がなかった。
+  // 壁の一部を X に差し替える形にすると、爆破でルートが短縮できる位置に自然に入る。
+  const wallCells: [number, number][] = [];
+  for (let r = 1; r < ROWS - 1; r++) {
+    for (let c = 1; c < COLS - 1; c++) if (g[r]![c] === "#") wallCells.push([c, r]);
+  }
+  const xCount = Math.min(wallCells.length, randInt(rand, 2, 4));
+  for (let i = 0; i < xCount; i++) {
+    const [c, r] = wallCells[randInt(rand, 0, wallCells.length - 1)]!;
+    g[r]![c] = "X";
+  }
+  return g;
+}
+
+/**
+ * 左右対称にしてよい型（GDD §7 v0.24）。
+ *
+ * 回廊・四部屋・要塞・堀は「隔壁に開けた1マスの出入口」で通行を成立させているので、
+ * 左半分を右へ写すと**右側の出入口が塞がってしまう**（実際に、生成した回廊の1行が
+ * 丸ごと壁になって上部が孤立した）。出入口に依存しない型だけ対称化する。
+ */
+const SYMMETRIC_OK: readonly TerrainKind[] = ["open", "pillars", "cages"];
+
+/** 盤面の地形を作る（型に沿って組み立て、許される型だけ左右対称にする） */
+function buildTerrain(kind: TerrainKind, rand: () => number, symmetric: boolean): Grid {
+  const g = buildTerrainOf(kind, rand);
+  if (symmetric && SYMMETRIC_OK.includes(kind)) {
     for (let r = 1; r < ROWS - 1; r++) {
       for (let c = 1; c < Math.floor(COLS / 2); c++) g[r]![COLS - 1 - c] = g[r]![c]!;
     }
@@ -176,45 +354,108 @@ function validate(g: Grid, kinds: string[]): boolean {
     if (!canRicochet) return false;
   }
 
-  // 移動する敵（B・D・F・S）は動ける床の広がりが必要
+  // 敵Y「ミラー」は正面からの直射が返ってくるため、**側面・背面から当てられる位置**が要る。
+  // 装甲は常にプレイヤーの方を向くので、「装甲の正面 ±ARMOR_ARC の外から届く射線」を探す。
+  for (const e of stage.spawns.mirror) {
+    const canFlank = reachPts.some((p) => {
+      if (!hasLineOfSight(stage, p.x, p.y, e.x, e.y)) return false;
+      // その位置から撃つと装甲は自分の方を向くので必ず正面になる＝跳弾でしか抜けない。
+      // よって「跳弾で届くか」を側面攻撃の成立条件とする
+      return findOuterWallRicochet(stage, p.x, p.y, e.x, e.y) !== null;
+    });
+    const canRicochet = reachPts.some((p) => findOuterWallRicochet(stage, p.x, p.y, e.x, e.y));
+    if (!canFlank && !canRicochet) return false;
+  }
+
+  // 移動する敵（B・D・F・S・L）は動ける床の広がりが必要
   const movers = [
     ...stage.spawns.rover,
     ...stage.spawns.minelayer,
     ...stage.spawns.chaser,
     ...stage.spawns.shielder,
+    ...stage.spawns.lancer,
   ];
   for (const m of movers) {
     const area = reachable(g, Math.floor(m.x / T), Math.floor(m.y / T));
     if (area.size < 30) return false;
   }
+
+  // --- 地雷が活きる条件（GDD §7 v0.24） ---
+  // 1. 移動する敵が1体以上（置いた地雷を踏む相手がいなければ接近起爆は死に機能）
+  if (movers.length === 0) return false;
+  // 2. 破壊可能壁 X が2箇所以上（爆風で開通させる価値をつくる）
+  if (countTiles(g, "X") < 2) return false;
+  // 3. 幅1の隘路が一定数ある（敵が必ず通る場所＝地雷を置く価値のある地形）
+  if (countNarrowCells(g, reach) < MIN_NARROW_CELLS) return false;
   return true;
 }
 
+/** 盤面に含まれる指定タイルの数 */
+function countTiles(g: Grid, ch: string): number {
+  let n = 0;
+  for (let r = 1; r < ROWS - 1; r++) {
+    for (let c = 1; c < COLS - 1; c++) if (g[r]![c] === ch) n++;
+  }
+  return n;
+}
+
+/**
+ * 「幅1の隘路」の数（GDD §7 v0.24）。
+ * 左右が塞がっている（縦の通路）か、上下が塞がっている（横の通路）床タイルを数える。
+ * ここが多いほど敵の通り道が絞られ、地雷を置く価値が出る。
+ * プレイヤーが到達できる範囲だけを数える（届かない場所の隘路は意味がない）。
+ */
+function countNarrowCells(g: Grid, reach: Set<string>): number {
+  let n = 0;
+  for (const key of reach) {
+    const [c, r] = key.split(",").map(Number) as [number, number];
+    if (g[r]![c] !== ".") continue;
+    const blocked = (cc: number, rr: number): boolean => solidForTank(g[rr]?.[cc] ?? "#");
+    const vertical = blocked(c - 1, r) && blocked(c + 1, r);
+    const horizontal = blocked(c, r - 1) && blocked(c, r + 1);
+    if (vertical || horizontal) n++;
+  }
+  return n;
+}
+
+/** 到達範囲に必要な隘路の数（GDD §7 v0.24。少なすぎると地雷を置く場所が無い） */
+const MIN_NARROW_CELLS = 6;
+
+/** 移動する敵（地雷の接近起爆を成立させるために必ず1体入れる。GDD §7 v0.24） */
+const MOVERS = ["B", "D", "F", "S", "L"];
+
 /** ミッション番号に応じた敵構成（難易度曲線） */
 function compositionFor(n: number): string[] {
+  const ALL = ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M", "T", "L", "Y"];
   const pools: [number, string[]][] = [
     [22, ["A", "B", "C", "D"]], // M17-22：既知の4種で3体
-    [30, ["A", "B", "C", "D", "E", "F", "V", "M"]], // M23-30：E/F と新種 V/M が混ざる4体
-    [40, ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]], // M31-40：全10種から5体
-    [49, ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]], // M41-49：6体
+    [26, ["A", "B", "C", "D", "E", "F", "V", "M"]], // M23-26：E/F・V/M が混ざる4体
+    [30, ["A", "B", "C", "D", "E", "F", "V", "M", "T", "L"]], // M27-30：新種 T/L のお披露目
+    [40, ALL], // M31-40：全13種から5体
+    [49, ALL], // M41-49：6体
   ];
   const count = n <= 22 ? 3 : n <= 30 ? 4 : n <= 40 ? 5 : 6;
-  if (n === 50) return ["A", "B", "C", "D", "E", "F", "G", "S", "V", "M"]; // 最終面は全10種
+  if (n === 50) return ALL; // 最終面は全13種が1体ずつ
   const pool = pools.find(([hi]) => n <= hi)![1];
   const rand = rng(n * 7919);
-  const out: string[] = [];
   // 種類が偏らないよう、プールを一巡させてから残りを埋める
   const shuffled = [...pool].sort(() => rand() - 0.5);
+  const out: string[] = [];
   for (let i = 0; i < count; i++) out.push(shuffled[i % shuffled.length]!);
+  // 移動する敵が1体も入らなかったら1枠を差し替える（地雷が死に機能にならないように）
+  if (!out.some((k) => MOVERS.includes(k))) {
+    const candidates = pool.filter((k) => MOVERS.includes(k));
+    if (candidates.length > 0) out[out.length - 1] = candidates[randInt(rand, 0, candidates.length - 1)]!;
+  }
   return out;
 }
 
-/** 1ミッションを生成する（条件を満たすまで種を変えて試行） */
+/** 1ミッションを生成する（地形の型は番号で決まる。条件を満たすまで種を変えて試行） */
 function generateMission(n: number): { name: string; grid: string[] } | null {
   const kinds = compositionFor(n);
   for (let attempt = 0; attempt < 4000; attempt++) {
     const rand = rng(n * 100003 + attempt);
-    const g = buildTerrain(rand, randInt(rand, 4, 8), rand() < 0.35);
+    const g = buildTerrain(terrainFor(n), rand, rand() < 0.3);
     const spots = floorTiles(g);
     if (spots.length < 140) continue;
 
