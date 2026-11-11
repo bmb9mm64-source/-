@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ハネダン！ 紹介動画の撮影ページ（開発用）</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161c; overflow: hidden; }
+  #app { width: 100vw; height: 100vh; }
+  #app canvas { display: block; }
+  /* ここから下は動画にだけ載せる字幕・暗転・締めの一枚（ゲーム本体には無い） */
+  #caption {
+    position: fixed; left: 50%; bottom: 46px; transform: translateX(-50%);
+    padding: 12px 30px; border-radius: 10px;
+    background: rgba(13, 16, 24, 0.86); border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #fff; font: bold 31px sans-serif; white-space: nowrap; letter-spacing: 0.02em;
+    opacity: 0;
+  }
+  #endcard {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    background: rgba(13, 16, 24, 0.9); color: #fff; font-family: sans-serif; opacity: 0;
+  }
+  #endcard .name { font-size: 104px; font-weight: bold; letter-spacing: 0.04em; }
+  #endcard .tag { font-size: 34px; font-weight: bold; color: #ffd76a; }
+  #endcard .how { font-size: 27px; color: #cfd6e6; }
+  #endcard .url {
+    margin-top: 16px; padding: 12px 30px; border-radius: 10px;
+    background: #2f6fd0; font: bold 29px monospace;
+  }
+  #fade { position: fixed; inset: 0; background: #000; opacity: 0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="caption"></div>
+<div id="endcard">
+  <div class="name">ハネダン！</div>
+  <div class="tag">壁で跳ね返して、撃ち抜け。</div>
+  <div class="how">ブラウザですぐ遊べる ・ インストール不要 ・ PCでもスマホでも</div>
+  <div class="url">bmb9mm64-source.github.io/-/</div>
+</div>
+<div id="fade"></div>
+<script type="module" src="./capture.ts"></script>
+</body>
+</html>

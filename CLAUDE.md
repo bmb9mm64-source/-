@@ -59,10 +59,11 @@ src/                 … 本実装（Phaser + TS）。core/ は Phaser 非依存
                          config/balance.ts     … 調整値と配色
 tests/               … Vitest の単体テスト（ミッションの機械検証を含む）
 scripts/             … 開発用ツール（generateMissions.ts＝M17〜M50 の生成器。ゲーム本体からは import しない）
+                       scripts/promo/ … README 用の紹介動画（docs/video/）を撮るツール。ボットが本物のゲームを遊び、1コマずつ録画する
 index.html / package.json / tsconfig.json / vite.config.ts … ビルド構成
 ```
 
-※ `assets/` は未作成。画像はコード描画、音は Web Audio の自作合成で、外部素材が1つもないため（導入する場合は `assets/CREDITS.md` に出所とライセンスを必ず記録する）。
+※ `assets/` は未作成。画像はコード描画、音は Web Audio の自作合成で、外部素材が1つもないため（導入する場合は `assets/CREDITS.md` に出所とライセンスを必ず記録する）。`docs/` の画像・動画は、自作のゲーム画面をそのまま撮ったもの。
 
 ## コーディング規約（Phase 2 以降）
 
