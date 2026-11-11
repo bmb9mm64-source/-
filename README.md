@@ -5,7 +5,10 @@
 
 **▶ [ここで遊ぶ](https://bmb9mm64-source.github.io/-/)**
 
-![プレイ画面](docs/images/gameplay.png)
+[![紹介動画（30秒）— クリックで音つきの動画を再生](docs/video/promo.webp)](docs/video/promo.mp4)
+
+↑ 30秒の紹介動画です（クリックすると**音つき**の MP4 が開きます）。映っているのは実際のゲーム画面で、
+難易度 NORMAL を自動操作のボットが遊んだものをそのまま録画しています。
 
 ## どんなゲームか
 
@@ -84,3 +87,6 @@ npm run build    # dist/ に本番ビルド
 ```
 
 デバッグ用に `?m=<番号>` で任意のミッションから開始できます（例：`?m=50`）。
+
+紹介動画は `node scripts/promo/record.mjs capture` で撮り直せます（Playwright と ffmpeg が必要。
+仕組みは [`scripts/promo/record.mjs`](scripts/promo/record.mjs) の冒頭に書いてあります）。
